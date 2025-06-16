@@ -25,7 +25,7 @@ def prepare_test_batch(raw_batch, full_dataset, device):
 
     for query_row in raw_batch:
         queries.append(query_row["query"])
-        good_passages = query_row["passages.passage_text"]
+        good_passages = query_row["passages"]["passage_text"]
         good_documents.extend(good_passages)
         
         good_passage_count = len(good_passages)
@@ -40,7 +40,7 @@ def prepare_test_batch(raw_batch, full_dataset, device):
                 if random_row['query_id'] == query_row['query_id']:
                     random_row = None
              
-            random_passage = random.sample(random_row["passages.passage_text"])[0]
+            random_passage = random.sample(random_row["passages"]["passage_text"], k=1)[0]
             bad_documents.append(random_passage)
     
     return {
@@ -77,7 +77,7 @@ def calculate_triplet_loss(query_vectors, good_document_vectors, bad_document_ve
     bad_similarity = F.cosine_similarity(query_vectors, bad_document_vectors, dim=1)
 
     diff = good_similarity - bad_similarity
-    return torch.max(torch.tensor(0.0), torch.tensor(margin) - diff, dim=1).sum(dim=0)
+    return torch.max(torch.tensor(0), torch.tensor(margin) - diff).sum(dim=0)
 
 def process_test_batch(batch, full_dataset, query_tower, doc_tower, device, margin):
     prepared = prepare_test_batch(batch, full_dataset, device)
@@ -129,8 +129,18 @@ class QueryTower(nn.Module):
         return self.average_pooling(flattened_tokens, offsets)
 
 if __name__ == "__main__":
+    print("Loading dataset...")
     dataset = load_dataset("microsoft/ms_marco", "v1.1")
-    train_data_loader = DataLoader(dataset["train"], batch_size=2, shuffle=True)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    margin = 0.2  # Margin for triplet loss
+    print(f'Using device: {device}')
+    train_dataset = dataset["train"]
+    train_data_loader = DataLoader(
+        train_dataset,
+        batch_size=2,
+        shuffle=True,
+        collate_fn=lambda x: x,  # No special collate function needed
+    )
 
     doc_tower = DocumentTower()
     query_tower = QueryTower()
@@ -143,9 +153,11 @@ if __name__ == "__main__":
     running_samples = 0
 
     total_batches = len(train_data_loader)
+
+    print("Beginning training...")
     for batch_idx, raw_batch in enumerate(train_data_loader):
         optimizer.zero_grad()
-        batch_results = process_test_batch(raw_batch)
+        batch_results = process_test_batch(raw_batch, train_dataset, query_tower, doc_tower, device, margin)
         loss = batch_results["total_loss"]
         running_samples += batch_results["document_count"]
         running_loss += loss.item()
