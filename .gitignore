@@ -1,0 +1,56 @@
+# Python specific
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+*.manifest
+*.spec
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+.venv/
+.env/
+*.env
+
+# Machine Learning/Dataset files
+*.h5
+*.hdf5
+*.tsv
+*.pkl
+*.joblib
+*.npy
+*.npz
+
+# Logs
+*.log
+*.out
+*.err
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+
+# Miscellaneous
+.DS_Store
+Thumbs.db
+
+# Git specific
+*.orig
+*.rej
+*.patch
+*.diff
+
+# Temporary files
+*.tmp
+*.temp
+~$*

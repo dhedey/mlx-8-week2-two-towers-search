@@ -1,0 +1,6 @@
+*.csv filter=lfs diff=lfs merge=lfs -text
+text8.txt filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs
+*.pt filter=lfs diff=lfs merge=lfs
+*.pth filter=lfs diff=lfs merge=lfs
+*.arrow filter=lfs diff=lfs merge=lfs
