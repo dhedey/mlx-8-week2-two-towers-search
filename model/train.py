@@ -58,9 +58,41 @@ class Word2VecTokenizer(TokenizerBase):
     def load(cls):
         folder = os.path.dirname(__file__)
         word_vectors = torch.load(folder + '/word_vectors.pt')
+
+        # Implement boosting
+        import pandas as pd
+        import math
+        word_counts = pd.read_csv(folder + '/word_counts.csv')
+        word_counts = {
+            row["word"]: row["count"]
+            for index, row in word_counts.iterrows()
+        }
+
+        def generate_shrink_factor(word):
+            MIN_APPEARANCE_THRESHOLD = 10
+
+            if word in word_counts:
+                appearance_count = max(MIN_APPEARANCE_THRESHOLD, word_counts[word])
+            else:
+                appearance_count = MIN_APPEARANCE_THRESHOLD
+            
+            inverse_freqency = 10 / appearance_count # Between 0 and 1
+
+            return math.sqrt(inverse_freqency)
+        
+        print("Boosting embeddings...")
+        # embeddings = word_vectors["embeddings"] * torch.diag(
+        #     torch.tensor([generate_shrink_factor(word) for word in word_vectors["vocabulary"]])
+        # )
+        embeddings = torch.stack([
+            word_embedding * generate_shrink_factor(word)
+            for (word_embedding, word) in zip(word_vectors["embeddings"], word_vectors["vocabulary"])
+        ])
+        print("Boosting complete")
+
         return cls(
             token_map={word: i for i, word in enumerate(word_vectors["vocabulary"])},
-            default_token_embeddings=word_vectors["embeddings"],
+            default_token_embeddings=embeddings,
         )
 
     def embeddings(self):
