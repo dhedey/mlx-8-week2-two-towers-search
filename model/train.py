@@ -171,6 +171,7 @@ class DocumentTower(nn.Module):
             default_token_embeddings=parameters.tokenizer.default_token_embeddings,
             training_parameters=parameters.training,
             hidden_layer_sizes=parameters.model.doc_tower_hidden_dimensions,
+            include_layer_norms=parameters.model.include_layer_norms,
             output_size=parameters.model.comparison_embedding_size,
         )
 
@@ -191,6 +192,7 @@ class QueryTower(nn.Module):
             default_token_embeddings=parameters.tokenizer.default_token_embeddings,
             training_parameters=parameters.training,
             hidden_layer_sizes=parameters.model.query_tower_hidden_dimensions,
+            include_layer_norms=parameters.model.include_layer_norms,
             output_size=parameters.model.comparison_embedding_size,
         )
 
@@ -203,6 +205,7 @@ class PooledTowerModel(nn.Module):
             default_token_embeddings: torch.Tensor,
             training_parameters: TrainingHyperparameters,
             hidden_layer_sizes: list[int],
+            include_layer_norms: bool,
             output_size: int,
         ):
         super(PooledTowerModel, self).__init__()
@@ -217,7 +220,7 @@ class PooledTowerModel(nn.Module):
         output_sizes = dimension_sizes + [output_size]
         hidden_layer_sizes = zip(input_sizes[:-1], output_sizes[:-1])
         self.hidden_layers = nn.Sequential(*[
-            HiddenLayer(input_size, output_size, training_parameters.dropout) for input_size, output_size in hidden_layer_sizes
+            HiddenLayer(input_size, output_size, include_layer_norms, training_parameters.dropout) for input_size, output_size in hidden_layer_sizes
         ])
 
         self.output_layer = nn.Linear(input_sizes[-1], output_sizes[-1])
@@ -234,11 +237,14 @@ class PooledTowerModel(nn.Module):
         return x
 
 class HiddenLayer(nn.Module):
-    def __init__(self, input_size, output_size, dropout=0.0):
+    def __init__(self, input_size, output_size, include_layer_norm, dropout):
         super(HiddenLayer, self).__init__()
         self.linear = nn.Linear(input_size, output_size)
         self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(output_size)
+        if include_layer_norm:
+            self.layer_norm = nn.LayerNorm(output_size)
+        else:
+            self.layer_norm = nn.Identity()
 
     def forward(self, x):
         x = self.linear(x)
@@ -269,8 +275,8 @@ if __name__ == "__main__":
         batch_size=128,
         epochs=2,
         learning_rate=0.002,
-        freeze_embeddings=False,
-        dropout=0.1
+        freeze_embeddings=True,
+        dropout=0.3,
     )
     model_parameters = ModelHyperparameters(
         comparison_embedding_size=128,
@@ -283,12 +289,12 @@ if __name__ == "__main__":
         training=training_parameters,
         model=model_parameters,
         tokenizer=tokenizer,
-    ))
+    )).to(device)
     query_tower = QueryTower(parameters=QueryTowerParameters(
         training=training_parameters,
         model=model_parameters,
         tokenizer=tokenizer,
-    ))
+    )).to(device)
 
     combined_parameters = list(doc_tower.parameters()) + list(query_tower.parameters())
     optimizer = optim.Adam(combined_parameters, lr=0.002)
