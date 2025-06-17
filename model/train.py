@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datasets import load_dataset
+import datasets
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.nn as nn
@@ -327,7 +327,8 @@ class ModelTrainer:
 
 if __name__ == "__main__":
     print("Loading dataset...")
-    dataset = load_dataset("microsoft/ms_marco", "v1.1")
+    datasets.config.IN_MEMORY_MAX_SIZE = 8 * 1024 * 1024 # 8GB
+    dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1")
     DEVICE_IF_MPS_SUPPORT = 'cpu' # or 'mps' - but it doesn't work well with EmbeddingBag
     device = torch.device('cuda' if torch.cuda.is_available() else DEVICE_IF_MPS_SUPPORT if torch.backends.mps.is_available() else 'cpu')
     
