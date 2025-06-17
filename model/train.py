@@ -293,7 +293,7 @@ if __name__ == "__main__":
     combined_parameters = list(doc_tower.parameters()) + list(query_tower.parameters())
     optimizer = optim.Adam(combined_parameters, lr=0.002)
 
-    print_every = 100
+    print_every = 10
     running_loss = 0.0
     running_samples = 0
 
