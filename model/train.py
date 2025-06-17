@@ -16,6 +16,7 @@ class TrainingHyperparameters:
     learning_rate: float
     freeze_embeddings: bool
     dropout: float
+    margin: float = 0.2  # Margin for triplet loss
 
     @classmethod
     def for_prediction(cls):
@@ -65,44 +66,34 @@ class ModelTokenizer:
         mapped_words = [self.token_map[word] for word in filtered_title_words if word in self.token_map]
         return mapped_words
 
-def prepare_test_batch(tokenizer: ModelTokenizer, raw_batch, full_dataset, device):
+def prepare_test_batch(raw_batch, negative_samples, device):
     queries = []
     good_documents = []
     bad_documents = []
-    dataset_len = len(full_dataset)
     document_count_for_each_query = []
 
-    if dataset_len <= 1:
-        raise ValueError("Dataset must contain more than one item to sample bad documents.")
-
     for query_row in raw_batch:
-        queries.append(query_row["query"])
-        good_passages = query_row["passages"]["passage_text"]
+        queries.append(query_row["tokenized_query"])
+        good_passages = query_row["tokenized_passages"]
         good_documents.extend(good_passages)
         
         good_passage_count = len(good_passages)
         document_count_for_each_query.append(good_passage_count)
 
-        # Sample bad documents randomly
-        for i in range(good_passage_count):
-            random_row = None
-            while random_row is None:
-                random_index = random.randint(0, len(full_dataset) - 1)
-                random_row = full_dataset[random_index]
-                if random_row['query_id'] == query_row['query_id']:
-                    random_row = None
-             
-            random_passage = random.sample(random_row["passages"]["passage_text"], k=1)[0]
-            bad_documents.append(random_passage)
+    # TODO: Add in retrying of query-id clashes
+    negative_sample_choices = torch.randint(low=0, high=len(negative_samples), size=(len(good_documents),)).tolist()
+    bad_documents = [
+        negative_samples[i]["tokenized_passage"] for i in negative_sample_choices
+    ]
     
     return {
-        "queries": prepare_tokens_for_embedding_bag(queries, tokenizer, device),
-        "good_documents": prepare_tokens_for_embedding_bag(good_documents, tokenizer, device),
-        "bad_documents": prepare_tokens_for_embedding_bag(bad_documents, tokenizer, device),
+        "queries": prepare_tokens_for_embedding_bag(queries, device),
+        "good_documents": prepare_tokens_for_embedding_bag(good_documents, device),
+        "bad_documents": prepare_tokens_for_embedding_bag(bad_documents, device),
         "document_count_for_each_query": document_count_for_each_query, # List not tensor
     }
 
-def prepare_tokens_for_embedding_bag(strings, tokenizer: ModelTokenizer, device):
+def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
     See https://docs.pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
     """
@@ -110,9 +101,8 @@ def prepare_tokens_for_embedding_bag(strings, tokenizer: ModelTokenizer, device)
     offsets = []
     current_offset = 0
 
-    for string in strings:
+    for tokens in tokens_list:
         offsets.append(current_offset)
-        tokens = tokenizer.tokenize(string)
         flattened_tokens.extend(tokens)
         current_offset += len(tokens)
 
@@ -131,8 +121,8 @@ def calculate_triplet_loss(query_vectors, good_document_vectors, bad_document_ve
     diff = good_similarity - bad_similarity
     return torch.max(torch.tensor(0), torch.tensor(margin) - diff).sum(dim=0)
 
-def process_test_batch(tokenizer, batch, full_dataset, query_tower, doc_tower, device, margin):
-    prepared = prepare_test_batch(tokenizer, batch, full_dataset, device)
+def process_test_batch(batch, negative_samples, query_tower, doc_tower, device, margin):
+    prepared = prepare_test_batch(batch, negative_samples, device)
 
     query_vectors = query_tower(prepared["queries"])              # tensor of shape (Q, E)
     good_document_vectors = doc_tower(prepared["good_documents"]) # tensor of shape (D, E)
@@ -252,14 +242,96 @@ class HiddenLayer(nn.Module):
         x = self.dropout(x)
         x = self.layer_norm(x)
         return x
+    
+class ModelTrainer:
+    def __init__(self, query_tower: torch.nn.Module, doc_tower: torch.nn.Module, training_parameters: TrainingHyperparameters):
+        self.query_tower = query_tower
+        self.doc_tower = doc_tower
+        self.training_parameters = training_parameters
+
+        print("Preparing model for training...")
+        combined_parameters = list(self.doc_tower.parameters()) + list(self.query_tower.parameters())
+        self.optimizer = optim.Adam(combined_parameters, lr=0.002)
+
+        print("Tokenizing queries and passages...")
+        train_dataset = dataset["train"].map(
+            lambda x: {
+                "tokenized_query": tokenizer.tokenize(x["query"]),
+                "tokenized_passages": [
+                    tokenizer.tokenize(passage) for passage in x["passages"]["passage_text"]
+                ],
+            })
+
+        self.train_data_loader = DataLoader(
+            train_dataset,
+            batch_size=training_parameters.batch_size,
+            shuffle=True,
+            collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
+        )
+
+        print(f"Generating negative samples...")
+        self.negative_samples = [
+            { "tokenized_passage": tokenized_passage, "query_id": query_row["query_id"] }
+            for query_row in train_dataset
+            for tokenized_passage in query_row["tokenized_passages"]
+        ]
+
+    def train(self):
+        print("Beginning training...")
+
+        self.epoch = 1
+
+        while self.epoch <= self.training_parameters.epochs:
+            print(f"Epoch {self.epoch}/{self.training_parameters.epochs}")
+            self.train_epoch()
+            self.save_model()
+            self.epoch += 1
+
+        print("Training complete.")
+
+    def train_epoch(self):
+        self.doc_tower.train()
+        self.query_tower.train()
+
+        print_every = 10
+        running_loss = 0.0
+        running_samples = 0
+        total_batches = len(self.train_data_loader)
+        for batch_idx, raw_batch in enumerate(self.train_data_loader):
+            self.optimizer.zero_grad()
+            batch_results = process_test_batch(raw_batch, self.negative_samples, query_tower, doc_tower, device, self.training_parameters.margin)
+            loss = batch_results["total_loss"]
+            running_samples += batch_results["document_count"]
+            running_loss += loss.item()
+
+            loss.backward()
+            self.optimizer.step()
+
+            batch_num = batch_idx + 1
+            if batch_num % print_every == 0:
+                print(f"Epoch {self.epoch}, Batch {batch_num}/{total_batches}, Average Loss: {(running_loss / running_samples):.4f}")
+                running_loss = 0.0
+                running_samples = 0
+    
+    def save_model(self):
+        model_folder = os.path.dirname(__file__)
+        model_filename = 'model.pt'
+        torch.save({
+            "query_tower": self.query_tower.state_dict(),
+            "doc_tower": self.doc_tower.state_dict(),
+            "training_parameters": self.training_parameters.to_dict(),
+            "model_parameters": ModelHyperparameters().to_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+        }, os.path.join(model_folder, model_filename))
+        print(f"Model saved to {model_filename}.")
 
 if __name__ == "__main__":
     print("Loading dataset...")
     dataset = load_dataset("microsoft/ms_marco", "v1.1")
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    margin = 0.2  # Margin for triplet loss
+    DEVICE_IF_MPS_SUPPORT = 'cpu' # or 'mps' - but it doesn't work well with EmbeddingBag
+    device = torch.device('cuda' if torch.cuda.is_available() else DEVICE_IF_MPS_SUPPORT if torch.backends.mps.is_available() else 'cpu')
+    
     print(f'Using device: {device}')
-    train_dataset = dataset["train"]
 
     tokenizer = ModelTokenizer.load()
     token_embeddings = tokenizer.default_token_embeddings
@@ -269,7 +341,7 @@ if __name__ == "__main__":
         batch_size=128,
         epochs=2,
         learning_rate=0.002,
-        freeze_embeddings=True,
+        freeze_embeddings=False,
         dropout=0.3,
     )
     model_parameters = ModelHyperparameters(
@@ -290,37 +362,14 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
     )).to(device)
 
-    combined_parameters = list(doc_tower.parameters()) + list(query_tower.parameters())
-    optimizer = optim.Adam(combined_parameters, lr=0.002)
-
-    print_every = 10
-    running_loss = 0.0
-    running_samples = 0
-
-
-    train_data_loader = DataLoader(
-        train_dataset,
-        batch_size=training_parameters.batch_size,
-        shuffle=True,
-        collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
+    trainer = ModelTrainer(
+        query_tower=query_tower,
+        doc_tower=doc_tower,
+        training_parameters=training_parameters
     )
-    total_batches = len(train_data_loader)
+    trainer.train()
+    print("Training complete")
 
-    print("Beginning training...")
-    for batch_idx, raw_batch in enumerate(train_data_loader):
-        optimizer.zero_grad()
-        batch_results = process_test_batch(tokenizer, raw_batch, train_dataset, query_tower, doc_tower, device, margin)
-        loss = batch_results["total_loss"]
-        running_samples += batch_results["document_count"]
-        running_loss += loss.item()
 
-        loss.backward()
-        optimizer.step()
-
-        batch_num = batch_idx + 1
-        if batch_num % print_every == 0:
-            print(f"Batch {batch_num}/{total_batches}, Average Loss: {(running_loss / running_samples):.4f}")
-            running_loss = 0.0
-            running_samples = 0
 
         
