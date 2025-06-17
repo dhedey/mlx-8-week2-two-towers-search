@@ -426,10 +426,10 @@ if __name__ == "__main__":
     )
     model_parameters = ModelHyperparameters(
         comparison_embedding_size=128,
-        # query_tower_hidden_dimensions=[128, 64],
-        query_tower_hidden_dimensions=[],
-        # doc_tower_hidden_dimensions=[128, 64],
-        doc_tower_hidden_dimensions=[],
+        query_tower_hidden_dimensions=[128, 64],
+        # query_tower_hidden_dimensions=[],
+        doc_tower_hidden_dimensions=[128, 64],
+        # doc_tower_hidden_dimensions=[],
         include_layer_norms=True
     )
 
