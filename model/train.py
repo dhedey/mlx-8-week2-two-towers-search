@@ -8,6 +8,7 @@ import torch
 import re
 import os
 import statistics
+import transformers
 
 @dataclass
 class TrainingHyperparameters:
@@ -41,8 +42,15 @@ class ModelHyperparameters:
     def to_dict(self):
         return vars(self)
 
+
+class TokenizerBase:
+    def embeddings(self):
+        pass
+
+    def tokenize(self, string):
+        pass
 @dataclass
-class ModelTokenizer:
+class Word2VecTokenizer(TokenizerBase):
     token_map: dict[str, int]
     default_token_embeddings: torch.Tensor
 
@@ -54,12 +62,9 @@ class ModelTokenizer:
             token_map={word: i for i, word in enumerate(word_vectors["vocabulary"])},
             default_token_embeddings=word_vectors["embeddings"],
         )
-    
-    def vocabulary_size(self):
-        return len(self.token_map)
-    
-    def embedding_size(self):
-        return self.default_token_embeddings.shape[1]
+
+    def embeddings(self):
+        return self.default_token_embeddings
     
     def tokenize(self, string):
         filtered_title_words = re.sub(r'[^a-z0-9 ]', '', string.lower()).split()
@@ -151,7 +156,7 @@ def process_test_batch(batch, negative_samples, query_tower, doc_tower, device, 
 @dataclass
 class DocumentTowerParameters:
     training: TrainingHyperparameters
-    tokenizer: ModelTokenizer
+    tokenizer: Word2VecTokenizer
     model: ModelHyperparameters
 
 class DocumentTower(nn.Module):
@@ -172,7 +177,7 @@ class DocumentTower(nn.Module):
 @dataclass
 class QueryTowerParameters:
     training: TrainingHyperparameters
-    tokenizer: ModelTokenizer
+    tokenizer: Word2VecTokenizer
     model: ModelHyperparameters
 
 class QueryTower(nn.Module):
@@ -416,7 +421,7 @@ if __name__ == "__main__":
     
     print(f'Using device: {device}')
 
-    tokenizer = ModelTokenizer.load()
+    tokenizer = Word2VecTokenizer.load()
     token_embeddings = tokenizer.default_token_embeddings
     print(f"Tokenizer loaded. Vocabulary size {token_embeddings.shape[0]}, Embedding size: {token_embeddings.shape[1]}")
 
@@ -428,11 +433,11 @@ if __name__ == "__main__":
         dropout=0.3,
     )
     model_parameters = ModelHyperparameters(
-        comparison_embedding_size=128,
-        query_tower_hidden_dimensions=[128, 64],
-        # query_tower_hidden_dimensions=[],
-        doc_tower_hidden_dimensions=[128, 64],
-        # doc_tower_hidden_dimensions=[],
+        comparison_embedding_size=64,
+        # query_tower_hidden_dimensions=[128, 64],
+        query_tower_hidden_dimensions=[],
+        # doc_tower_hidden_dimensions=[128, 64],
+        doc_tower_hidden_dimensions=[],
         include_layer_norms=True
     )
 
