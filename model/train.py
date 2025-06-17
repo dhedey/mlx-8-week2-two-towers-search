@@ -5,9 +5,9 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
 import torch
-import random
 import re
 import os
+import statistics
 
 @dataclass
 class TrainingHyperparameters:
@@ -244,10 +244,11 @@ class HiddenLayer(nn.Module):
         return x
     
 class ModelTrainer:
-    def __init__(self, query_tower: torch.nn.Module, doc_tower: torch.nn.Module, training_parameters: TrainingHyperparameters):
+    def __init__(self, query_tower: torch.nn.Module, doc_tower: torch.nn.Module, training_parameters: TrainingHyperparameters, device):
         self.query_tower = query_tower
         self.doc_tower = doc_tower
         self.training_parameters = training_parameters
+        self.device = device
 
         print("Preparing model for training...")
         combined_parameters = list(self.doc_tower.parameters()) + list(self.query_tower.parameters())
@@ -269,6 +270,19 @@ class ModelTrainer:
             collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
         )
 
+        self.validation_dataset = dataset["validation"].map(
+            lambda x: {
+                "tokenized_query": tokenizer.tokenize(x["query"]),
+                "tokenized_passages": [
+                    tokenizer.tokenize(passage) for passage in x["passages"]["passage_text"]
+                ],
+            })
+        self.validation_data_loader = DataLoader(
+            self.validation_dataset,
+            batch_size=training_parameters.batch_size,
+            collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
+        )
+
         print(f"Generating negative samples...")
         self.negative_samples = [
             { "tokenized_passage": tokenized_passage, "query_id": query_row["query_id"] }
@@ -284,6 +298,7 @@ class ModelTrainer:
         while self.epoch <= self.training_parameters.epochs:
             print(f"Epoch {self.epoch}/{self.training_parameters.epochs}")
             self.train_epoch()
+            self.validate()
             self.save_model()
             self.epoch += 1
 
@@ -312,6 +327,70 @@ class ModelTrainer:
                 print(f"Epoch {self.epoch}, Batch {batch_num}/{total_batches}, Average Loss: {(running_loss / running_samples):.4f}")
                 running_loss = 0.0
                 running_samples = 0
+        print(f"Epoch {self.epoch} complete")
+
+    def validate(self):
+        print("Validating model:")
+        tokens_for_each_document = []
+        document_id_lookup = []
+        document_passages = []
+    
+        tokens_for_each_query = []
+        query_id_lookup = []
+        query_passages = []
+
+        print("Preparing validation data")
+        for query_row in self.validation_dataset:
+            tokens_for_each_document.extend(query_row["tokenized_passages"])
+            document_id_lookup.extend((query_row['query_id'], i) for i in range(len(query_row["tokenized_passages"])))
+            document_passages.extend(query_row["passages"]["passage_text"])
+
+            tokens_for_each_query.append(query_row['tokenized_query'])
+            query_id_lookup.append(query_row['query_id'])
+            query_passages.append(query_row['query'])
+
+        self.doc_tower.eval()
+        self.query_tower.eval()
+        
+        query_embeddings = self.query_tower(
+            prepare_tokens_for_embedding_bag(tokens_for_each_query, self.device)
+        )
+        document_embeddings = self.query_tower(
+            prepare_tokens_for_embedding_bag(tokens_for_each_document, self.device)
+        )
+
+        top_k_recall_accuracy_metrics = []
+        k_samples = 5
+        total_queries_to_consider = 1000
+        for query_index, query_embedding in enumerate(query_embeddings[:total_queries_to_consider]):
+            similarities = F.cosine_similarity(query_embedding, document_embeddings, dim=1).tolist() # (D) [5, 7, 2]
+            top_k_most_similar = sorted(enumerate(similarities), key=lambda x: x[1], reverse=True)[:k_samples]
+
+            query_id = query_id_lookup[query_index]
+            top_k_most_similar_document_ids = [{
+                "index": document_index,
+                "document_id": document_id_lookup[document_index],
+                "score": score,
+            } for document_index, score in top_k_most_similar]
+
+            matching_document_count = 0
+            for doc in top_k_most_similar_document_ids:
+                if doc["document_id"][0] == query_id:
+                    matching_document_count += 1
+
+            top_k_recall_accuracy_metrics.append(matching_document_count / k_samples)
+
+            if query_index % 100 == 0:
+                print(f"Query {query_id} \"{query_passages[query_index]}\" top 3 most similar documents:")
+                for doc in top_k_most_similar_document_ids:
+                    print(f"  => {doc["document_id"]} with score {doc['score']:.4f}: \"{document_passages[doc["index"]]}\"")
+                print("\n")
+        
+        print(f"Validation complete")
+        print()
+        print(f"Across the first {total_queries_to_consider} samples, for each query, top-{k_samples} doc samples were returned")
+        print(f"Across all these documents, {statistics.mean(top_k_recall_accuracy_metrics):.2%} were relevant to the query.")
+        print()
     
     def save_model(self):
         model_folder = os.path.dirname(__file__)
@@ -340,15 +419,17 @@ if __name__ == "__main__":
 
     training_parameters = TrainingHyperparameters(
         batch_size=128,
-        epochs=2,
+        epochs=20,
         learning_rate=0.002,
         freeze_embeddings=False,
         dropout=0.3,
     )
     model_parameters = ModelHyperparameters(
         comparison_embedding_size=128,
-        query_tower_hidden_dimensions=[128, 64],
-        doc_tower_hidden_dimensions=[128, 64],
+        # query_tower_hidden_dimensions=[128, 64],
+        query_tower_hidden_dimensions=[],
+        # doc_tower_hidden_dimensions=[128, 64],
+        doc_tower_hidden_dimensions=[],
         include_layer_norms=True
     )
 
@@ -366,10 +447,10 @@ if __name__ == "__main__":
     trainer = ModelTrainer(
         query_tower=query_tower,
         doc_tower=doc_tower,
-        training_parameters=training_parameters
+        training_parameters=training_parameters,
+        device=device,
     )
     trainer.train()
-    print("Training complete")
 
 
 
