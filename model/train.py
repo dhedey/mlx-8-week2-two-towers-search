@@ -260,12 +260,6 @@ if __name__ == "__main__":
     margin = 0.2  # Margin for triplet loss
     print(f'Using device: {device}')
     train_dataset = dataset["train"]
-    train_data_loader = DataLoader(
-        train_dataset,
-        batch_size=2,
-        shuffle=True,
-        collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
-    )
 
     tokenizer = ModelTokenizer.load()
     token_embeddings = tokenizer.default_token_embeddings
@@ -303,6 +297,13 @@ if __name__ == "__main__":
     running_loss = 0.0
     running_samples = 0
 
+
+    train_data_loader = DataLoader(
+        train_dataset,
+        batch_size=training_parameters.batch_size,
+        shuffle=True,
+        collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
+    )
     total_batches = len(train_data_loader)
 
     print("Beginning training...")
