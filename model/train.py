@@ -383,7 +383,10 @@ class ModelTrainer:
             if query_index % 100 == 0:
                 print(f"Query {query_id} \"{query_passages[query_index]}\" top 3 most similar documents:")
                 for doc in top_k_most_similar_document_ids:
-                    print(f"  => {doc["document_id"]} with score {doc['score']:.4f}: \"{document_passages[doc["index"]]}\"")
+                    document_id = doc["document_id"]
+                    score = doc["score"]
+                    passage = document_passages[doc["index"]]
+                    print(f"  => {document_id} with score {score:.3f}: \"{passage}\"")
                 print("\n")
         
         print(f"Validation complete")
