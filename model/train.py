@@ -283,14 +283,14 @@ class HiddenLayer(nn.Module):
         return x
     
 class ModelTrainer:
-    def __init__(self, query_tower: torch.nn.Module, doc_tower: torch.nn.Module, training_parameters: TrainingHyperparameters, device):
+    def __init__(self, query_tower: torch.nn.Module, document_tower: torch.nn.Module, training_parameters: TrainingHyperparameters, device):
         self.query_tower = query_tower
-        self.doc_tower = doc_tower
+        self.document_tower = document_tower
         self.training_parameters = training_parameters
         self.device = device
 
         print("Preparing model for training...")
-        combined_parameters = list(self.doc_tower.parameters()) + list(self.query_tower.parameters())
+        combined_parameters = list(self.document_tower.parameters()) + list(self.query_tower.parameters())
         self.optimizer = optim.Adam(combined_parameters, lr=0.002)
 
         print("Tokenizing queries and passages...")
@@ -344,7 +344,7 @@ class ModelTrainer:
         print("Training complete.")
 
     def train_epoch(self):
-        self.doc_tower.train()
+        self.document_tower.train()
         self.query_tower.train()
 
         print_every = 10
@@ -353,7 +353,7 @@ class ModelTrainer:
         total_batches = len(self.train_data_loader)
         for batch_idx, raw_batch in enumerate(self.train_data_loader):
             self.optimizer.zero_grad()
-            batch_results = process_test_batch(raw_batch, self.negative_samples, query_tower, doc_tower, self.training_parameters.margin)
+            batch_results = process_test_batch(raw_batch, self.negative_samples, query_tower, document_tower, self.training_parameters.margin)
             loss = batch_results["total_loss"]
             running_samples += batch_results["document_count"]
             running_loss += loss.item()
@@ -372,44 +372,45 @@ class ModelTrainer:
         print()
         print("== VALIDATING MODEL ==")
         print()
-        document_passage_to_document_index_lookup = {} # passage => index
+        document_passage_to_document_index = {} # passage => index
         document_index_to_document_ids = []
-        document_index_to_passage_texts = []
+        document_index_to_document_text = []
         document_index_to_tokenized_doc = []
         total_documents = 0
     
-        query_passage_to_query_index_lookup = {} # passage => query_index
-        query_index_to_tokenized_query = []
+        query_passage_to_query_index = {} # passage => query_index
         query_index_to_query_ids = []
         query_index_to_query_text = []
+        query_index_to_tokenized_query = []
 
         print("Preparing validation data...")
         for query_row in self.validation_dataset:
             query_id = query_row['query_id']
 
             # Add passages
-            for i, (tokenized_passage, passage_text) in enumerate(zip(query_row["tokenized_passages"], query_row["passages"]["passage_text"])):
+            for i, (tokenized_document, document_text) in enumerate(zip(query_row["tokenized_passages"], query_row["passages"]["passage_text"])):
                 total_documents += 1
-                if passage_text in document_passage_to_document_index_lookup:
-                    document_index = document_passage_to_document_index_lookup[passage_text]
+                if document_text in document_passage_to_document_index:
+                    document_index = document_passage_to_document_index[document_text]
                 else:
-                    document_index = len(document_passage_to_document_index_lookup)
-                    document_passage_to_document_index_lookup[passage_text] = document_index
+                    document_index = len(document_passage_to_document_index)
+                    document_passage_to_document_index[document_text] = document_index
                     document_index_to_document_ids.append([])
-                    document_index_to_passage_texts.append(passage_text)
-                    document_index_to_tokenized_doc.append(tokenized_passage)
+                    document_index_to_document_text.append(document_text)
+                    document_index_to_tokenized_doc.append(tokenized_document)
     
                 document_index_to_document_ids[document_index].append((query_id, i))
 
             query_text = query_row['query']
-            if query_text in query_passage_to_query_index_lookup:
-                query_index = query_passage_to_query_index_lookup[query_text]
+            tokenized_query = query_row['tokenized_query']
+            if query_text in query_passage_to_query_index:
+                query_index = query_passage_to_query_index[query_text]
             else:
-                query_index = len(query_passage_to_query_index_lookup)
-                query_passage_to_query_index_lookup[query_text] = i
-                query_index_to_tokenized_query.append(query_row['tokenized_query'])
+                query_index = len(query_passage_to_query_index)
+                query_passage_to_query_index[query_text] = query_index
                 query_index_to_query_ids.append([])
                 query_index_to_query_text.append(query_text)
+                query_index_to_tokenized_query.append(tokenized_query)
 
             query_index_to_query_ids[query_index].append(query_id)
 
@@ -419,29 +420,30 @@ class ModelTrainer:
         print(f"Distinct documents: {distinct_document_count} (of {total_documents} total documents)")
 
         print("Generating embeddings for validation data...")
-        self.doc_tower.eval()
+        self.document_tower.eval()
         self.query_tower.eval()
         
         query_embeddings = self.query_tower(query_index_to_tokenized_query)
-        document_embeddings = self.query_tower(document_index_to_tokenized_doc)
+        document_embeddings = self.document_tower(document_index_to_tokenized_doc)
+
+        k_samples = 5
+        total_queries_to_consider = 1000
+        print(f"Generating top-{k_samples} docs for {total_queries_to_consider} queries in validation set...")
 
         average_relevance_by_query = []
         reciprical_ranks_of_first_relevant_result_by_query = []
         any_relevant_result_by_query = []
 
-        k_samples = 5
-        total_queries_to_consider = 1000
         query_to_print = random.randint(0, total_queries_to_consider - 1)
 
-        print(f"Generating top-{k_samples} docs for {total_queries_to_consider} queries in validation set...")
-
-        for sample_query_id, query_embedding in enumerate(query_embeddings[:total_queries_to_consider]):
+        for query_index, query_embedding in enumerate(query_embeddings[:total_queries_to_consider]):
             similarities = F.cosine_similarity(query_embedding, document_embeddings, dim=1).tolist() # (D) [5, 7, 2]
             top_k_most_similar = sorted(enumerate(similarities), key=lambda x: x[1], reverse=True)[:k_samples]
 
-            relevant_query_ids = set(query_index_to_query_ids[i])
+            query_ids = query_index_to_query_ids[query_index]
+            query_ids_set = set(query_ids)
             top_k_is_relevant = [
-                any(document_id[0] in relevant_query_ids for document_id in document_index_to_document_ids[document_index])
+                any(document_id[0] in query_ids_set for document_id in document_index_to_document_ids[document_index])
                 for document_index, _ in top_k_most_similar
             ]
 
@@ -454,13 +456,13 @@ class ModelTrainer:
             average_relevance_by_query.append(statistics.mean(top_k_is_relevant))
             any_relevant_result_by_query.append(any(top_k_is_relevant))
 
-            if sample_query_id == query_to_print:
-                query_ids = query_index_to_query_ids[i]
+            if query_index == query_to_print:
                 print()
-                print(f"Example query {query_ids} \"{query_index_to_query_text[i]}\" top {k_samples} most similar documents:")
+                query_text = query_index_to_query_text[query_index]
+                print(f"Example query {query_ids} \"{query_text}\" top {k_samples} most similar documents:")
                 for document_index, score in top_k_most_similar:
                     document_ids = document_index_to_document_ids[document_index]
-                    passage = document_index_to_passage_texts[document_index]
+                    passage = document_index_to_document_text[document_index]
                     print(f"  => {document_ids} with score {score:.3f}: \"{passage}\"")
                 print()
         
@@ -477,7 +479,7 @@ class ModelTrainer:
         model_filename = 'model.pt'
         torch.save({
             "query_tower": self.query_tower.state_dict(),
-            "doc_tower": self.doc_tower.state_dict(),
+            "doc_tower": self.document_tower.state_dict(),
             "training_parameters": self.training_parameters.to_dict(),
             "model_parameters": ModelHyperparameters().to_dict(),
             "optimizer_state": self.optimizer.state_dict(),
@@ -513,7 +515,7 @@ if __name__ == "__main__":
         include_layer_norms=True
     )
 
-    doc_tower = DocumentTower(parameters=DocumentTowerParameters(
+    document_tower = DocumentTower(parameters=DocumentTowerParameters(
         training=training_parameters,
         model=model_parameters,
         tokenizer=tokenizer,
@@ -526,7 +528,7 @@ if __name__ == "__main__":
 
     trainer = ModelTrainer(
         query_tower=query_tower,
-        doc_tower=doc_tower,
+        document_tower=document_tower,
         training_parameters=training_parameters,
         device=device,
     )
