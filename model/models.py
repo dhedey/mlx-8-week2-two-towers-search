@@ -157,7 +157,7 @@ class PooledTwoTowerModel(DualEncoderModel):
         model_loader = ModelLoader()
         loaded_model_data = model_loader.load_model_data(
             model_name=model_name,
-            model_parameters_class=PooledTwoTowerModelHyperparameters,
+            model_parameters_class=(PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters"),
             device=device,
         )
         model = cls(
@@ -223,7 +223,7 @@ class PooledOneTowerModel(DualEncoderModel):
         model_loader = ModelLoader()
         loaded_model_data = model_loader.load_model_data(
             model_name=model_name,
-            model_parameters_class=PooledOneTowerModelHyperparameters,
+            model_parameters_class=(PooledOneTowerModelHyperparameters, "models.PooledOneTowerModelHyperparameters"),
             device=device,
         )
         model = cls(
@@ -265,3 +265,40 @@ def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
             )
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
+        
+if __name__ == "__main__":
+    print("Loading model...")
+    model = load_model_for_evaluation("two-tower-boosted-word2vec-linear")
+
+    documents = [
+        "My name is John Doe and I live in New York City.",
+        "I am a software engineer with a passion for machine learning.",
+        "The weather in New York City is often unpredictable.",
+        "I enjoy hiking and exploring new places on weekends.",
+        "My favorite programming language is Python, especially for data science tasks."
+    ]
+    document_embeddings = model.embed_tokenized_documents(
+        [model.tokenize_document(doc) for doc in documents]
+    )
+
+    query = "What is the weather like in New York City?"
+    query_embedding = model.embed_tokenized_queries(
+        [model.tokenize_query(query)]
+    )
+
+    similarities = [
+        {
+            "document": documents[index],
+            "similarity": score.item()
+        }
+        for (index, score) in enumerate(F.cosine_similarity(query_embedding, document_embeddings))
+    ]
+    ordered_results = sorted(similarities, key=lambda x: x["similarity"], reverse=True)
+
+    print()
+    print(f"Example Query: {query}")
+    print()
+    for result in ordered_results:
+        document = result["document"]
+        similarity = result["similarity"]
+        print(f"Similarity: {similarity:.3f} | Document: {document}")

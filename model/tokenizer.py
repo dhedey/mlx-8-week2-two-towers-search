@@ -32,7 +32,7 @@ class Word2VecTokenizer(TokenizerBase):
     @classmethod
     def load(cls):
         folder = os.path.dirname(__file__)
-        word_vectors = torch.load(folder + '/word_vectors.pt')
+        word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt')
 
         embeddings_shape = word_vectors["embeddings"].shape
         print(f"Word2Vec Tokenizer loaded. Vocabulary size {embeddings_shape[0]}, Embedding size: {embeddings_shape[1]}")
@@ -54,7 +54,7 @@ class Word2VecTokenizer(TokenizerBase):
                 return self.loaded_token_embeddings
             case "word2vec-boosted":
                 folder = os.path.dirname(__file__)
-                word_counts = pd.read_csv(folder + '/word_counts.csv')
+                word_counts = pd.read_csv(folder + '/data/week-1-word2vec-word-counts.csv')
                 word_counts = {
                     row["word"]: row["count"]
                     for index, row in word_counts.iterrows()

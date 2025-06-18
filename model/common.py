@@ -72,4 +72,4 @@ class ModelLoader:
         return loaded_data
 
     def model_location(self, model_name):
-        return os.path.join(self.folder, f"{model_name}.pt")
+        return os.path.join(self.folder, "data", f"{model_name}.pt")
