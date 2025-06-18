@@ -184,11 +184,82 @@ class PooledTwoTowerModel(DualEncoderModel):
     def model_hyperparameters(self):
         return self._model_hyperparameters
 
+@dataclass
+class PooledOneTowerModelHyperparameters:
+    tokenizer: str
+    comparison_embedding_size: int
+    hidden_dimensions: list[int]
+    include_layer_norms: bool
+
+    def to_dict(self):
+        return vars(self)
+
+class PooledOneTowerModel(DualEncoderModel):
+    tokenizer: TokenizerBase
+
+    def __init__(self, training_parameters: TrainingHyperparameters, model_parameters: PooledOneTowerModelHyperparameters):
+        super(PooledOneTowerModel, self).__init__()
+
+        match model_parameters.tokenizer:
+            case "week1-word2vec":
+                tokenizer = Word2VecTokenizer.load()
+                default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+            case _:
+                raise ValueError(f"Unknown tokenizer: {model_parameters.tokenizer}")
+            
+        self.tokenizer = tokenizer
+
+        self.tower=PooledTowerModel(
+            training_parameters=training_parameters,
+            hidden_layer_sizes=model_parameters.hidden_dimensions,
+            output_size=model_parameters.comparison_embedding_size,
+            include_layer_norms=model_parameters.include_layer_norms,
+            default_token_embeddings=default_token_embeddings,
+        )
+        self._model_hyperparameters = model_parameters
+
+    @classmethod
+    def load_for_evaluation(cls, model_name: str, device):
+        model_loader = ModelLoader()
+        loaded_model_data = model_loader.load_model_data(
+            model_name=model_name,
+            model_parameters_class=PooledOneTowerModelHyperparameters,
+            device=device,
+        )
+        model = cls(
+            training_parameters=TrainingHyperparameters.for_prediction(),
+            model_parameters=loaded_model_data["model_parameters"],
+        ).to(device)
+        model.load_state_dict(loaded_model_data["model"])
+        model.eval()
+
+        return model
+
+    def tokenize_query(self, query: str) -> list[int]:
+        return self.tokenizer.tokenize(query)
+    
+    def tokenize_document(self, document: str) -> list[int]:
+        return self.tokenizer.tokenize(document)
+
+    def embed_tokenized_queries(self, tokenized_queries: list[list[int]]):
+        return self.tower(tokenized_queries)
+
+    def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
+        return self.tower(tokenized_documents)
+    
+    def model_hyperparameters(self):
+        return self._model_hyperparameters
+
 def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
     device = select_device()
     match model_name:
         case "two-tower-boosted-word2vec-linear":
             return PooledTwoTowerModel.load_for_evaluation(
+                model_name=model_name,
+                device=device,
+            )
+        case "one-tower-boosted-word2vec-linear":
+            return PooledOneTowerModel.load_for_evaluation(
                 model_name=model_name,
                 device=device,
             )

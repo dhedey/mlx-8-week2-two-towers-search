@@ -80,13 +80,22 @@ def process_test_batch(batch, negative_samples, model: DualEncoderModel, margin)
     }
 
 class ModelTrainer:
-    def __init__(self, model_name: str, model: DualEncoderModel, training_parameters: TrainingHyperparameters):
+    def __init__(
+            self,
+            model_name: str,
+            model: DualEncoderModel,
+            training_parameters: TrainingHyperparameters,
+            validate_and_save_after_epochs: int = 5,
+        ):
+        torch.manual_seed(42)
+
         datasets.config.IN_MEMORY_MAX_SIZE = 8 * 1024 * 1024 # 8GB
         dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1")
 
         self.model_name = model_name
         self.model = model
         self.training_parameters = training_parameters
+        self.validate_and_save_after_epochs = validate_and_save_after_epochs
 
         print("Preparing model for training...")
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
@@ -135,8 +144,9 @@ class ModelTrainer:
         while self.epoch <= self.training_parameters.epochs:
             print(f"Epoch {self.epoch}/{self.training_parameters.epochs}")
             self.train_epoch()
-            self.validate()
-            self.save_model()
+            if self.epoch % self.validate_and_save_after_epochs == 0:
+                validation_results = self.validate()
+                self.save_model(validation_results)
             self.epoch += 1
 
         print("Training complete.")
@@ -261,16 +271,26 @@ class ModelTrainer:
                     passage = document_index_to_document_text[document_index]
                     print(f"  => {document_ids} with score {score:.3f}: \"{passage}\"")
                 print()
+
+        any_relevant_result = statistics.mean(any_relevant_result_by_query)
+        reciprical_rank = statistics.mean(reciprical_ranks_of_first_relevant_result_by_query)
+        average_relevance = statistics.mean(average_relevance_by_query)
         
         print(f"Across the first {total_queries_to_consider} queries, we queried the top {k_samples} documents (from {distinct_document_count} docs across {distinct_query_count} queries):")
-        print(f"> Proportion with any relevant result     : {statistics.mean(any_relevant_result_by_query):.2%}")
-        print(f"> Reciprical rank of first relevant result: {statistics.mean(reciprical_ranks_of_first_relevant_result_by_query):.2%}")
-        print(f"> Average relevance of results            : {statistics.mean(average_relevance_by_query):.2%}")
+        print(f"> Proportion with any relevant result     : {any_relevant_result:.2%}")
+        print(f"> Reciprical rank of first relevant result: {reciprical_rank:.2%}")
+        print(f"> Average relevance of results            : {average_relevance:.2%}")
         print()
         print(f"Validation complete")
         print()
+
+        return {
+            "any_relevant_result": any_relevant_result,
+            "reciprical_rank": reciprical_rank,
+            "average_relevance": average_relevance,
+        }
     
-    def save_model(self):
+    def save_model(self, validation_metrics):
         model_loader = ModelLoader()
         model_loader.save_model_data(
             model_name=self.model_name,
@@ -279,4 +299,5 @@ class ModelTrainer:
             training_parameters=self.training_parameters,
             optimizer=self.optimizer,
             epoch=self.epoch,
+            validation_metrics=validation_metrics,
         )

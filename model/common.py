@@ -49,7 +49,7 @@ class ModelLoader:
     def __init__(self):
         self.folder = os.path.dirname(__file__)
 
-    def save_model_data(self, model_name, model, model_parameters, training_parameters, optimizer, epoch):
+    def save_model_data(self, model_name, model, model_parameters, training_parameters, optimizer, epoch, validation_metrics):
         location = self.model_location(model_name)
         torch.save({
             "model": model.state_dict(),
@@ -57,6 +57,7 @@ class ModelLoader:
             "model_parameters": model_parameters,
             "optimizer_state": optimizer.state_dict(),
             "epoch": epoch,
+            "validation_metrics": validation_metrics,
         }, location)
         print(f"Model saved to {location}")
 
