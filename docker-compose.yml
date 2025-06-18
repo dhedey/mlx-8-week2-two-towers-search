@@ -2,11 +2,14 @@ version: '3.8'
 
 services:
   webapp:
-    build: .
+    build:
+      context: ./webapp
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     volumes:
-      - .:/app
+      - ./webapp:/app
+      - ./model:/app/model  # Mount the model directory
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379

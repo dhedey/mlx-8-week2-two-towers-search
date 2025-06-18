@@ -2,6 +2,7 @@ import streamlit as st
 import redis
 import os
 import numpy as np
+import torch
 from typing import List, Dict, Tuple
 
 # Redis connection
@@ -18,16 +19,36 @@ except redis.ConnectionError as e:
     st.error(f"Failed to connect to Redis: {str(e)}")
     redis_client = None
 
-if redis_client:
+# Load the model
+try:
+    model_path = os.path.join(os.path.dirname(__file__), "..", "model", "model.pt")
+    model = torch.load(model_path)
+    st.success("Successfully loaded model")
+except Exception as e:
+    st.error(f"Failed to load model: {str(e)}")
+    model = None
+
+if redis_client and model:
+    # Model Information Section
+    st.header("Model Information")
+    st.write("Using pre-trained model from model.pt")
+
     # Document Search Section
     st.header("Document Search")
 
     # Dummy Data Management
     st.subheader("Dummy Data Management")
 
-    # Function to generate dummy embeddings
-    def generate_dummy_embedding() -> List[float]:
-        return np.random.randn(128).tolist()  # 128-dimensional embedding
+    # Function to generate embeddings using the model
+    def generate_embedding(text: str) -> List[float]:
+        try:
+            # This is a placeholder - replace with actual model inference
+            # when the model team provides the correct way to use the model
+            st.warning("Using random embeddings as placeholder. Model inference to be implemented.")
+            return np.random.randn(128).tolist()
+        except Exception as e:
+            st.error(f"Error generating embedding: {str(e)}")
+            return np.random.randn(128).tolist()  # Fallback to random
 
     # Function to store dummy document
     def store_dummy_document(doc_id: str, content: str, embedding: List[float]):
@@ -81,7 +102,7 @@ if redis_client:
     with col2:
         if st.button("Add Dummy Document"):
             try:
-                embedding = generate_dummy_embedding()
+                embedding = generate_embedding(doc_content)
                 store_dummy_document(doc_id, doc_content, embedding)
                 st.success(f"Successfully added document {doc_id}")
             except Exception as e:
@@ -93,8 +114,8 @@ if redis_client:
 
     if st.button("Search"):
         try:
-            # Generate a dummy embedding for the query (in a real app, this would come from your model)
-            query_embedding = generate_dummy_embedding()
+            # Generate embedding for the query
+            query_embedding = generate_embedding(search_query)
 
             # Search documents
             results = search_documents(query_embedding)
