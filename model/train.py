@@ -9,6 +9,7 @@ import re
 import os
 import statistics
 import transformers
+import random
 
 @dataclass
 class TrainingHyperparameters:
@@ -49,6 +50,7 @@ class TokenizerBase:
 
     def tokenize(self, string):
         pass
+
 @dataclass
 class Word2VecTokenizer(TokenizerBase):
     token_map: dict[str, int]
@@ -367,69 +369,110 @@ class ModelTrainer:
         print(f"Epoch {self.epoch} complete")
 
     def validate(self):
-        print("Validating model:")
-        tokens_for_each_document = []
-        document_id_lookup = []
-        document_passages = []
+        print()
+        print("== VALIDATING MODEL ==")
+        print()
+        document_passage_to_document_index_lookup = {} # passage => index
+        document_index_to_document_ids = []
+        document_index_to_passage_texts = []
+        document_index_to_tokenized_doc = []
+        total_documents = 0
     
-        tokens_for_each_query = []
-        query_id_lookup = []
-        query_passages = []
+        query_passage_to_query_index_lookup = {} # passage => query_index
+        query_index_to_tokenized_query = []
+        query_index_to_query_ids = []
+        query_index_to_query_text = []
 
-        print("Preparing validation data")
+        print("Preparing validation data...")
         for query_row in self.validation_dataset:
-            tokens_for_each_document.extend(query_row["tokenized_passages"])
-            document_id_lookup.extend((query_row['query_id'], i) for i in range(len(query_row["tokenized_passages"])))
-            document_passages.extend(query_row["passages"]["passage_text"])
+            query_id = query_row['query_id']
 
-            tokens_for_each_query.append(query_row['tokenized_query'])
-            query_id_lookup.append(query_row['query_id'])
-            query_passages.append(query_row['query'])
+            # Add passages
+            for i, (tokenized_passage, passage_text) in enumerate(zip(query_row["tokenized_passages"], query_row["passages"]["passage_text"])):
+                total_documents += 1
+                if passage_text in document_passage_to_document_index_lookup:
+                    document_index = document_passage_to_document_index_lookup[passage_text]
+                else:
+                    document_index = len(document_passage_to_document_index_lookup)
+                    document_passage_to_document_index_lookup[passage_text] = document_index
+                    document_index_to_document_ids.append([])
+                    document_index_to_passage_texts.append(passage_text)
+                    document_index_to_tokenized_doc.append(tokenized_passage)
+    
+                document_index_to_document_ids[document_index].append((query_id, i))
 
+            query_text = query_row['query']
+            if query_text in query_passage_to_query_index_lookup:
+                query_index = query_passage_to_query_index_lookup[query_text]
+            else:
+                query_index = len(query_passage_to_query_index_lookup)
+                query_passage_to_query_index_lookup[query_text] = i
+                query_index_to_tokenized_query.append(query_row['tokenized_query'])
+                query_index_to_query_ids.append([])
+                query_index_to_query_text.append(query_text)
+
+            query_index_to_query_ids[query_index].append(query_id)
+
+        print(f"Distinct queries: {len(query_index_to_tokenized_query)} (of {len(self.validation_dataset)} total queries)")
+        print(f"Distinct documents: {len(document_index_to_tokenized_doc)} (of {total_documents} total documents)")
+
+        print("Generating embeddings for validation data...")
         self.doc_tower.eval()
         self.query_tower.eval()
         
         query_embeddings = self.query_tower(
-            prepare_tokens_for_embedding_bag(tokens_for_each_query, self.device)
+            prepare_tokens_for_embedding_bag(query_index_to_tokenized_query, self.device)
         )
         document_embeddings = self.query_tower(
-            prepare_tokens_for_embedding_bag(tokens_for_each_document, self.device)
+            prepare_tokens_for_embedding_bag(document_index_to_tokenized_doc, self.device)
         )
 
-        top_k_recall_accuracy_metrics = []
+        average_relevance_by_query = []
+        reciprical_ranks_of_first_relevant_result_by_query = []
+        any_relevant_result_by_query = []
+
         k_samples = 5
         total_queries_to_consider = 1000
-        for query_index, query_embedding in enumerate(query_embeddings[:total_queries_to_consider]):
+        query_to_print = random.randint(0, total_queries_to_consider - 1)
+
+        print(f"Generating top-{k_samples} docs for {total_queries_to_consider} queries in validation set...")
+
+        for sample_query_id, query_embedding in enumerate(query_embeddings[:total_queries_to_consider]):
             similarities = F.cosine_similarity(query_embedding, document_embeddings, dim=1).tolist() # (D) [5, 7, 2]
             top_k_most_similar = sorted(enumerate(similarities), key=lambda x: x[1], reverse=True)[:k_samples]
 
-            query_id = query_id_lookup[query_index]
-            top_k_most_similar_document_ids = [{
-                "index": document_index,
-                "document_id": document_id_lookup[document_index],
-                "score": score,
-            } for document_index, score in top_k_most_similar]
+            relevant_query_ids = set(query_index_to_query_ids[i])
+            top_k_is_relevant = [
+                any(document_id[0] in relevant_query_ids for document_id in document_index_to_document_ids[document_index])
+                for document_index, _ in top_k_most_similar
+            ]
 
-            matching_document_count = 0
-            for doc in top_k_most_similar_document_ids:
-                if doc["document_id"][0] == query_id:
-                    matching_document_count += 1
+            inverse_first_relevant_rank = 0
+            for i in range(k_samples):
+                if top_k_is_relevant[i]:
+                    inverse_first_relevant_rank = 1 / (i + 1)
+                    break
+            reciprical_ranks_of_first_relevant_result_by_query.append(inverse_first_relevant_rank)
+            average_relevance_by_query.append(statistics.mean(top_k_is_relevant))
+            any_relevant_result_by_query.append(any(top_k_is_relevant))
 
-            top_k_recall_accuracy_metrics.append(matching_document_count / k_samples)
-
-            if query_index % 100 == 0:
-                print(f"Query {query_id} \"{query_passages[query_index]}\" top 3 most similar documents:")
-                for doc in top_k_most_similar_document_ids:
-                    document_id = doc["document_id"]
-                    score = doc["score"]
-                    passage = document_passages[doc["index"]]
-                    print(f"  => {document_id} with score {score:.3f}: \"{passage}\"")
-                print("\n")
+            if sample_query_id == query_to_print:
+                query_ids = query_index_to_query_ids[i]
+                print()
+                print(f"Example query {query_ids} \"{query_index_to_query_text[i]}\" top {k_samples} most similar documents:")
+                for document_index, score in top_k_most_similar:
+                    document_ids = document_index_to_document_ids[document_index]
+                    passage = document_index_to_passage_texts[document_index]
+                    print(f"  => {document_ids} with score {score:.3f}: \"{passage}\"")
+                print()
         
-        print(f"Validation complete")
         print()
-        print(f"Across the first {total_queries_to_consider} samples, for each query, top-{k_samples} doc samples were returned")
-        print(f"Across all these documents, {statistics.mean(top_k_recall_accuracy_metrics):.2%} were relevant to the query.")
+        print(f"Across the first {total_queries_to_consider} queries, we queried the top {k_samples} documents:")
+        print(f"> Proportion with any relevant result     : {statistics.mean(any_relevant_result_by_query):.2%}")
+        print(f"> Reciprical rank of first relevant result: {statistics.mean(reciprical_ranks_of_first_relevant_result_by_query):.2%}")
+        print(f"> Average relevance of results            : {statistics.mean(average_relevance_by_query):.2%}")
+        print()
+        print(f"Validation complete")
         print()
     
     def save_model(self):
