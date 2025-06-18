@@ -43,6 +43,7 @@ if __name__ == "__main__":
     ).to(device)
 
     trainer = ModelTrainer(
+        model_name="two-tower-boosted-word2vec-linear",
         model=model,
         training_parameters=training_parameters,
     )

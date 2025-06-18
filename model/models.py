@@ -12,7 +12,7 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters
+from common import TrainingHyperparameters, ModelLoader, select_device
 from tokenizer import Word2VecTokenizer, TokenizerBase
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
@@ -92,6 +92,9 @@ class DualEncoderModel(nn.Module):
     def __init__(self):
         super(DualEncoderModel, self).__init__()
 
+    def get_device(self):
+        return next(self.parameters()).device
+
     def tokenize_query(self, query: str) -> list[int]:
         raise NotImplementedError("This method should be implemented by subclasses.")
 
@@ -149,6 +152,23 @@ class PooledTwoTowerModel(DualEncoderModel):
         )
         self._model_hyperparameters = model_parameters
 
+    @classmethod
+    def load_for_evaluation(cls, model_name: str, device):
+        model_loader = ModelLoader()
+        loaded_model_data = model_loader.load_model_data(
+            model_name=model_name,
+            model_parameters_class=PooledTwoTowerModelHyperparameters,
+            device=device,
+        )
+        model = cls(
+            training_parameters=TrainingHyperparameters.for_prediction(),
+            model_parameters=loaded_model_data["model_parameters"],
+        ).to(device)
+        model.load_state_dict(loaded_model_data["model"])
+        model.eval()
+
+        return model
+
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
     
@@ -164,3 +184,13 @@ class PooledTwoTowerModel(DualEncoderModel):
     def model_hyperparameters(self):
         return self._model_hyperparameters
 
+def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
+    device = select_device()
+    match model_name:
+        case "two-tower-boosted-word2vec-linear":
+            return PooledTwoTowerModel.load_for_evaluation(
+                model_name=model_name,
+                device=device,
+            )
+        case _:
+            raise ValueError(f"Unknown model name: {model_name}")

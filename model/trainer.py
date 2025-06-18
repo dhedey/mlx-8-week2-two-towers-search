@@ -12,8 +12,8 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters
-from model import DualEncoderModel
+from common import TrainingHyperparameters, ModelLoader
+from models import DualEncoderModel
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -80,10 +80,11 @@ def process_test_batch(batch, negative_samples, model: DualEncoderModel, margin)
     }
 
 class ModelTrainer:
-    def __init__(self, model: DualEncoderModel, training_parameters: TrainingHyperparameters):
+    def __init__(self, model_name: str, model: DualEncoderModel, training_parameters: TrainingHyperparameters):
         datasets.config.IN_MEMORY_MAX_SIZE = 8 * 1024 * 1024 # 8GB
         dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1")
 
+        self.model_name = model_name
         self.model = model
         self.training_parameters = training_parameters
 
@@ -270,13 +271,12 @@ class ModelTrainer:
         print()
     
     def save_model(self):
-        model_folder = os.path.dirname(__file__)
-        model_filename = 'model.pt'
-        torch.save({
-            "model": self.model.state_dict(),
-            "training_parameters": self.training_parameters.to_dict(),
-            "model_parameters": self.model.model_hyperparameters(),
-            "optimizer_state": self.optimizer.state_dict(),
-        }, os.path.join(model_folder, model_filename))
-        print(f"Model saved to {model_filename}.")
-        
+        model_loader = ModelLoader()
+        model_loader.save_model_data(
+            model_name=self.model_name,
+            model=self.model,
+            model_parameters=self.model.model_hyperparameters(),
+            training_parameters=self.training_parameters,
+            optimizer=self.optimizer,
+            epoch=self.epoch,
+        )
