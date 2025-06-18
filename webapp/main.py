@@ -4,16 +4,29 @@ import os
 import numpy as np
 import torch
 from typing import List, Dict, Tuple
+import sys
+
+# Add the parent directory to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from model.train import PooledTwoTowerModel, TrainingHyperparameters, PooledTwoTowerModelHyperparameters, Word2VecTokenizer
 
 # Redis connection
-redis_host = os.getenv('REDIS_HOST', 'localhost')
+redis_host = os.getenv('REDIS_HOST', 'localhost')  # Use 'redis' when running in Docker
 redis_port = int(os.getenv('REDIS_PORT', 6379))
 
 st.title("Document Search Interface")
 
 # Initialize Redis connection
 try:
-    redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+    redis_client = redis.Redis(
+        host=redis_host,
+        port=redis_port,
+        decode_responses=True,
+        socket_timeout=5,  # Add timeout
+        socket_connect_timeout=5  # Add connection timeout
+    )
+    # Test the connection
+    redis_client.ping()
     st.success(f"Successfully connected to Redis at {redis_host}:{redis_port}")
 except redis.ConnectionError as e:
     st.error(f"Failed to connect to Redis: {str(e)}")
@@ -22,8 +35,21 @@ except redis.ConnectionError as e:
 # Load the model
 try:
     model_path = os.path.join(os.path.dirname(__file__), "..", "model", "model.pt")
-    model = torch.load(model_path)
+    checkpoint = torch.load(model_path)
+
+    # Initialize model with the same parameters
+    tokenizer = Word2VecTokenizer.load()
+    training_params = TrainingHyperparameters.for_prediction()
+    model_params = PooledTwoTowerModelHyperparameters(**checkpoint["model_parameters"])
+    model = PooledTwoTowerModel(training_params, model_params, tokenizer)
+
+    # Load the saved state
+    model.load_state_dict(checkpoint["model"])
+    model.eval()  # Set to evaluation mode
+
     st.success("Successfully loaded model")
+    st.write("Model parameters:", checkpoint["model_parameters"])
+    st.write("Training parameters:", checkpoint["training_parameters"])
 except Exception as e:
     st.error(f"Failed to load model: {str(e)}")
     model = None
@@ -32,6 +58,8 @@ if redis_client and model:
     # Model Information Section
     st.header("Model Information")
     st.write("Using pre-trained model from model.pt")
+    st.write(f"Model parameters: {checkpoint['model_parameters']}")
+    st.write(f"Training parameters: {checkpoint['training_parameters']}")
 
     # Document Search Section
     st.header("Document Search")
