@@ -34,7 +34,7 @@ class TrainingHyperparameters:
         return vars(self)
 
 @dataclass
-class ModelHyperparameters:
+class PooledTwoTowerModelHyperparameters:
     comparison_embedding_size: int = 128
     query_tower_hidden_dimensions: list[int] = field(default_factory=lambda: [128, 64])
     doc_tower_hidden_dimensions: list[int] = field(default_factory=lambda: [128, 64])
@@ -160,38 +160,12 @@ def calculate_triplet_loss(query_vectors, good_document_vectors, bad_document_ve
     diff = good_similarity - bad_similarity
     return torch.max(torch.tensor(0), torch.tensor(margin) - diff).sum(dim=0)
 
-def process_test_batch(batch, negative_samples, query_tower, doc_tower, margin):
-    prepared = prepare_test_batch(batch, negative_samples)
-
-    query_vectors = query_tower(prepared["tokenized_queries"])              # tensor of shape (Q, E)
-    good_document_vectors = doc_tower(prepared["tokenized_good_documents"]) # tensor of shape (D, E)
-    bad_document_vectors = doc_tower(prepared["tokenized_bad_documents"])   # tensor of shape (D, E)
-
-    # Duplicate each query so that it pairs with each document under that query
-    # This means it ends up with the same length as the good/bad document vectors
-    queries_for_each_document = torch.concat([ # tensor of shape (D, E) where D is the total number of documents
-        query_vector.repeat(document_count, 1) # tensor of shape (K, E) where K is the number of documents for this query
-        for (query_vector, document_count) in zip(query_vectors, prepared["document_count_for_each_query"])
-    ])
-
-    total_loss = calculate_triplet_loss(
-        queries_for_each_document,
-        good_document_vectors,
-        bad_document_vectors,
-        margin
-    )
-
-    return {
-        "total_loss": total_loss,
-        "document_count": good_document_vectors.shape[0],
-    }
-
 
 @dataclass
 class DocumentTowerParameters:
     training: TrainingHyperparameters
     tokenizer: Word2VecTokenizer
-    model: ModelHyperparameters
+    model: PooledTwoTowerModelHyperparameters
 
 class DocumentTower(nn.Module):
     def __init__(self, parameters: DocumentTowerParameters):
@@ -212,7 +186,7 @@ class DocumentTower(nn.Module):
 class QueryTowerParameters:
     training: TrainingHyperparameters
     tokenizer: Word2VecTokenizer
-    model: ModelHyperparameters
+    model: PooledTwoTowerModelHyperparameters
 
 class QueryTower(nn.Module):
     def __init__(self, parameters: QueryTowerParameters):
@@ -281,17 +255,85 @@ class HiddenLayer(nn.Module):
         x = self.dropout(x)
         x = self.layer_norm(x)
         return x
+
+class DualEncoderModel(nn.Module):
+    """A base class for all our dual encoder models."""
+    def __init__(self):
+        super(DualEncoderModel, self).__init__()
+
+    def embed_tokenized_queries(self, document_tokens: list[list[int]]):
+        raise NotImplementedError("This method should be implemented by subclasses.")
+
+    def embed_tokenized_documents(self, document_tokens: list[list[int]]):
+        raise NotImplementedError("This method should be implemented by subclasses.")
     
+    def model_hyperparameters(self):
+        raise NotImplementedError("This method should be implemented by subclasses.")
+    
+class PooledTwoTowerModel(DualEncoderModel):
+    def __init__(self, training_parameters: TrainingHyperparameters, model_parameters: PooledTwoTowerModelHyperparameters, tokenizer: Word2VecTokenizer):
+        super(PooledTwoTowerModel, self).__init__()
+
+        self.query_tower=QueryTower(
+            parameters=QueryTowerParameters(
+                training=training_parameters,
+                model=model_parameters,
+                tokenizer=tokenizer,
+            )
+        )
+        self.document_tower=DocumentTower(
+            parameters=DocumentTowerParameters(
+                training=training_parameters,
+                model=model_parameters,
+                tokenizer=tokenizer,
+            )
+        )
+        self._model_hyperparameters = model_parameters
+
+    def embed_tokenized_queries(self, tokenized_queries: list[list[int]]):
+        return self.query_tower(tokenized_queries)
+
+    def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
+        return self.document_tower(tokenized_documents)
+    
+    def model_hyperparameters(self):
+        return self._model_hyperparameters
+
+
+def process_test_batch(batch, negative_samples, model: DualEncoderModel, margin):
+    prepared = prepare_test_batch(batch, negative_samples)
+
+    query_vectors = model.embed_tokenized_queries(prepared["tokenized_queries"])                  # tensor of shape (Q, E)
+    good_document_vectors = model.embed_tokenized_documents(prepared["tokenized_good_documents"]) # tensor of shape (D, E)
+    bad_document_vectors = model.embed_tokenized_documents(prepared["tokenized_bad_documents"])   # tensor of shape (D, E)
+
+    # Duplicate each query so that it pairs with each document under that query
+    # This means it ends up with the same length as the good/bad document vectors
+    queries_for_each_document = torch.concat([ # tensor of shape (D, E) where D is the total number of documents
+        query_vector.repeat(document_count, 1) # tensor of shape (K, E) where K is the number of documents for this query
+        for (query_vector, document_count) in zip(query_vectors, prepared["document_count_for_each_query"])
+    ])
+
+    total_loss = calculate_triplet_loss(
+        queries_for_each_document,
+        good_document_vectors,
+        bad_document_vectors,
+        margin
+    )
+
+    return {
+        "total_loss": total_loss,
+        "document_count": good_document_vectors.shape[0],
+    }
+
 class ModelTrainer:
-    def __init__(self, query_tower: torch.nn.Module, document_tower: torch.nn.Module, training_parameters: TrainingHyperparameters, device):
-        self.query_tower = query_tower
-        self.document_tower = document_tower
+    def __init__(self, model: DualEncoderModel, training_parameters: TrainingHyperparameters, device):
+        self.model = model
         self.training_parameters = training_parameters
         self.device = device
 
         print("Preparing model for training...")
-        combined_parameters = list(self.document_tower.parameters()) + list(self.query_tower.parameters())
-        self.optimizer = optim.Adam(combined_parameters, lr=0.002)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
 
         print("Tokenizing queries and passages...")
         train_dataset = dataset["train"].map(
@@ -344,8 +386,7 @@ class ModelTrainer:
         print("Training complete.")
 
     def train_epoch(self):
-        self.document_tower.train()
-        self.query_tower.train()
+        self.model.train()
 
         print_every = 10
         running_loss = 0.0
@@ -353,7 +394,7 @@ class ModelTrainer:
         total_batches = len(self.train_data_loader)
         for batch_idx, raw_batch in enumerate(self.train_data_loader):
             self.optimizer.zero_grad()
-            batch_results = process_test_batch(raw_batch, self.negative_samples, query_tower, document_tower, self.training_parameters.margin)
+            batch_results = process_test_batch(raw_batch, self.negative_samples, self.model, self.training_parameters.margin)
             loss = batch_results["total_loss"]
             running_samples += batch_results["document_count"]
             running_loss += loss.item()
@@ -420,11 +461,10 @@ class ModelTrainer:
         print(f"Distinct documents: {distinct_document_count} (of {total_documents} total documents)")
 
         print("Generating embeddings for validation data...")
-        self.document_tower.eval()
-        self.query_tower.eval()
+        self.model.eval()
         
-        query_embeddings = self.query_tower(query_index_to_tokenized_query)
-        document_embeddings = self.document_tower(document_index_to_tokenized_doc)
+        query_embeddings = self.model.embed_tokenized_queries(query_index_to_tokenized_query)
+        document_embeddings = self.model.embed_tokenized_documents(document_index_to_tokenized_doc)
 
         k_samples = 5
         total_queries_to_consider = 1000
@@ -478,10 +518,9 @@ class ModelTrainer:
         model_folder = os.path.dirname(__file__)
         model_filename = 'model.pt'
         torch.save({
-            "query_tower": self.query_tower.state_dict(),
-            "doc_tower": self.document_tower.state_dict(),
+            "model": self.model.state_dict(),
             "training_parameters": self.training_parameters.to_dict(),
-            "model_parameters": ModelHyperparameters().to_dict(),
+            "model_parameters": self.model.model_hyperparameters(),
             "optimizer_state": self.optimizer.state_dict(),
         }, os.path.join(model_folder, model_filename))
         print(f"Model saved to {model_filename}.")
@@ -506,7 +545,7 @@ if __name__ == "__main__":
         freeze_embeddings=False,
         dropout=0.3,
     )
-    model_parameters = ModelHyperparameters(
+    model_parameters = PooledTwoTowerModelHyperparameters(
         comparison_embedding_size=64,
         # query_tower_hidden_dimensions=[128, 64],
         query_tower_hidden_dimensions=[],
@@ -515,20 +554,14 @@ if __name__ == "__main__":
         include_layer_norms=True
     )
 
-    document_tower = DocumentTower(parameters=DocumentTowerParameters(
-        training=training_parameters,
-        model=model_parameters,
+    model = PooledTwoTowerModel(
+        training_parameters=training_parameters,
+        model_parameters=model_parameters,
         tokenizer=tokenizer,
-    )).to(device)
-    query_tower = QueryTower(parameters=QueryTowerParameters(
-        training=training_parameters,
-        model=model_parameters,
-        tokenizer=tokenizer,
-    )).to(device)
+    ).to(device)
 
     trainer = ModelTrainer(
-        query_tower=query_tower,
-        document_tower=document_tower,
+        model=model,
         training_parameters=training_parameters,
         device=device,
     )
