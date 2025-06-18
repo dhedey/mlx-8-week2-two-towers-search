@@ -103,7 +103,7 @@ def main():
 
     # Search button
     if st.button("Search") and query:
-        results = app.search(query, 10)
+        results = app.search(query, DEFAULT_TOP_K)
 
         # Display results
         if results:
