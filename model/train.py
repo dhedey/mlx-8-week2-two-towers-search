@@ -105,7 +105,7 @@ class Word2VecTokenizer(TokenizerBase):
         mapped_words = [self.token_map[word] for word in filtered_title_words if word in self.token_map]
         return mapped_words
 
-def prepare_test_batch(raw_batch, negative_samples, device):
+def prepare_test_batch(raw_batch, negative_samples):
     queries = []
     good_documents = []
     bad_documents = []
@@ -126,10 +126,10 @@ def prepare_test_batch(raw_batch, negative_samples, device):
     ]
     
     return {
-        "queries": prepare_tokens_for_embedding_bag(queries, device),
-        "good_documents": prepare_tokens_for_embedding_bag(good_documents, device),
-        "bad_documents": prepare_tokens_for_embedding_bag(bad_documents, device),
-        "document_count_for_each_query": document_count_for_each_query, # List not tensor
+        "tokenized_queries": queries,
+        "tokenized_good_documents": good_documents,
+        "tokenized_bad_documents": bad_documents,
+        "document_count_for_each_query": document_count_for_each_query,
     }
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
@@ -145,10 +145,10 @@ def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
         flattened_tokens.extend(tokens)
         current_offset += len(tokens)
 
-    return {
-        "flattened_tokens": torch.tensor(flattened_tokens, dtype=torch.long).to(device),
-        "offsets": torch.tensor(offsets, dtype=torch.long).to(device)
-    }
+    return [
+        torch.tensor(flattened_tokens, dtype=torch.long).to(device),
+        torch.tensor(offsets, dtype=torch.long).to(device),
+    ]
 
 def calculate_triplet_loss(query_vectors, good_document_vectors, bad_document_vectors, margin: float = 0.2):
     """
@@ -160,12 +160,12 @@ def calculate_triplet_loss(query_vectors, good_document_vectors, bad_document_ve
     diff = good_similarity - bad_similarity
     return torch.max(torch.tensor(0), torch.tensor(margin) - diff).sum(dim=0)
 
-def process_test_batch(batch, negative_samples, query_tower, doc_tower, device, margin):
-    prepared = prepare_test_batch(batch, negative_samples, device)
+def process_test_batch(batch, negative_samples, query_tower, doc_tower, margin):
+    prepared = prepare_test_batch(batch, negative_samples)
 
-    query_vectors = query_tower(prepared["queries"])              # tensor of shape (Q, E)
-    good_document_vectors = doc_tower(prepared["good_documents"]) # tensor of shape (D, E)
-    bad_document_vectors = doc_tower(prepared["bad_documents"])   # tensor of shape (D, E)
+    query_vectors = query_tower(prepared["tokenized_queries"])              # tensor of shape (Q, E)
+    good_document_vectors = doc_tower(prepared["tokenized_good_documents"]) # tensor of shape (D, E)
+    bad_document_vectors = doc_tower(prepared["tokenized_bad_documents"])   # tensor of shape (D, E)
 
     # Duplicate each query so that it pairs with each document under that query
     # This means it ends up with the same length as the good/bad document vectors
@@ -255,9 +255,9 @@ class PooledTowerModel(nn.Module):
         self.output_layer = nn.Linear(input_sizes[-1], output_sizes[-1])
 
 
-    def forward(self, queries):
-        flattened_tokens = queries["flattened_tokens"]
-        offsets = queries["offsets"]
+    def forward(self, tokens: list[list[int]]):
+        device = next(self.parameters()).device
+        flattened_tokens, offsets = prepare_tokens_for_embedding_bag(tokens, device)
 
         x = self.average_pooling(flattened_tokens, offsets)
         x = self.hidden_layers(x)
@@ -353,7 +353,7 @@ class ModelTrainer:
         total_batches = len(self.train_data_loader)
         for batch_idx, raw_batch in enumerate(self.train_data_loader):
             self.optimizer.zero_grad()
-            batch_results = process_test_batch(raw_batch, self.negative_samples, query_tower, doc_tower, device, self.training_parameters.margin)
+            batch_results = process_test_batch(raw_batch, self.negative_samples, query_tower, doc_tower, self.training_parameters.margin)
             loss = batch_results["total_loss"]
             running_samples += batch_results["document_count"]
             running_loss += loss.item()
@@ -413,19 +413,17 @@ class ModelTrainer:
 
             query_index_to_query_ids[query_index].append(query_id)
 
-        print(f"Distinct queries: {len(query_index_to_tokenized_query)} (of {len(self.validation_dataset)} total queries)")
-        print(f"Distinct documents: {len(document_index_to_tokenized_doc)} (of {total_documents} total documents)")
+        distinct_query_count = len(query_index_to_tokenized_query)
+        distinct_document_count = len(document_index_to_tokenized_doc)
+        print(f"Distinct queries: {distinct_query_count} (of {len(self.validation_dataset)} total queries)")
+        print(f"Distinct documents: {distinct_document_count} (of {total_documents} total documents)")
 
         print("Generating embeddings for validation data...")
         self.doc_tower.eval()
         self.query_tower.eval()
         
-        query_embeddings = self.query_tower(
-            prepare_tokens_for_embedding_bag(query_index_to_tokenized_query, self.device)
-        )
-        document_embeddings = self.query_tower(
-            prepare_tokens_for_embedding_bag(document_index_to_tokenized_doc, self.device)
-        )
+        query_embeddings = self.query_tower(query_index_to_tokenized_query)
+        document_embeddings = self.query_tower(document_index_to_tokenized_doc)
 
         average_relevance_by_query = []
         reciprical_ranks_of_first_relevant_result_by_query = []
@@ -466,8 +464,7 @@ class ModelTrainer:
                     print(f"  => {document_ids} with score {score:.3f}: \"{passage}\"")
                 print()
         
-        print()
-        print(f"Across the first {total_queries_to_consider} queries, we queried the top {k_samples} documents:")
+        print(f"Across the first {total_queries_to_consider} queries, we queried the top {k_samples} documents (from {distinct_document_count} docs across {distinct_query_count} queries):")
         print(f"> Proportion with any relevant result     : {statistics.mean(any_relevant_result_by_query):.2%}")
         print(f"> Reciprical rank of first relevant result: {statistics.mean(reciprical_ranks_of_first_relevant_result_by_query):.2%}")
         print(f"> Average relevance of results            : {statistics.mean(average_relevance_by_query):.2%}")
