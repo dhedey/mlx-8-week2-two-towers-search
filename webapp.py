@@ -12,7 +12,6 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from model.models import load_model_for_evaluation
-from model.common import TrainingHyperparameters
 
 # Constants
 DEFAULT_EMBEDDING_SIZE = 128
@@ -32,7 +31,6 @@ class SearchApp:
             decode_responses=True
         )
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(model_name)
         self.model = load_model_for_evaluation(model_name)
         self.model.to(self.device)
         self.model.eval()
