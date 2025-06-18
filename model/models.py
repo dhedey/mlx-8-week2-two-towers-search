@@ -39,7 +39,7 @@ def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
         torch.tensor(offsets, dtype=torch.long).to(device),
         torch.tensor(mean_weights, dtype=torch.float).to(device),
     ]
-    
+
 class PooledTowerModel(nn.Module):
     def __init__(
             self,
@@ -128,10 +128,10 @@ class DualEncoderModel(nn.Module):
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         raise NotImplementedError("This method should be implemented by subclasses.")
-    
+
     def model_hyperparameters(self):
         raise NotImplementedError("This method should be implemented by subclasses.")
-    
+
     @classmethod
     def hyper_parameters_class(cls):
         # e.g. return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
@@ -155,7 +155,7 @@ class DualEncoderModel(nn.Module):
         model.validation_metrics = loaded_model_data["validation_metrics"]
 
         return model
-    
+
     @classmethod
     def load_to_continue_training(cls, model_name: str, device):
         model_loader = ModelLoader()
@@ -225,10 +225,13 @@ class PooledTwoTowerModel(DualEncoderModel):
     def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PooledTwoTowerModelHyperparameters):
         super(PooledTwoTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
 
-        tokenizer = get_tokenizer(model_parameters.tokenizer)
-        default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
-        default_token_embedding_boosts = tokenizer.generate_default_embedding_boosts(training_parameters.initial_token_embeddings_boost_kind)
-            
+        match model_parameters.tokenizer:
+            case "week1-word2vec":
+                tokenizer = Word2VecTokenizer.load()
+                default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+            case _:
+                raise ValueError(f"Unknown tokenizer: {model_parameters.tokenizer}")
+
         self.tokenizer = tokenizer
 
         self.query_tower=PooledTowerModel(
@@ -248,14 +251,14 @@ class PooledTwoTowerModel(DualEncoderModel):
             default_token_embedding_boosts=default_token_embedding_boosts,
         )
         self._model_hyperparameters = model_parameters
-    
+
     @classmethod
     def hyper_parameters_class(cls):
         return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
 
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
-    
+
     def tokenize_document(self, document: str) -> list[int]:
         return self.tokenizer.tokenize(document)
 
@@ -264,7 +267,7 @@ class PooledTwoTowerModel(DualEncoderModel):
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         return self.document_tower(tokenized_documents)
-    
+
     def model_hyperparameters(self):
         return self._model_hyperparameters
 
@@ -284,10 +287,13 @@ class PooledOneTowerModel(DualEncoderModel):
     def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PooledOneTowerModelHyperparameters):
         super(PooledOneTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
 
-        tokenizer = get_tokenizer(model_parameters.tokenizer)
-        default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
-        default_token_embedding_boosts = tokenizer.generate_default_embedding_boosts(training_parameters.initial_token_embeddings_boost_kind)
-            
+        match model_parameters.tokenizer:
+            case "week1-word2vec":
+                tokenizer = Word2VecTokenizer.load()
+                default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+            case _:
+                raise ValueError(f"Unknown tokenizer: {model_parameters.tokenizer}")
+
         self.tokenizer = tokenizer
 
         self.tower=PooledTowerModel(
@@ -306,7 +312,7 @@ class PooledOneTowerModel(DualEncoderModel):
 
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
-    
+
     def tokenize_document(self, document: str) -> list[int]:
         return self.tokenizer.tokenize(document)
 
@@ -315,7 +321,7 @@ class PooledOneTowerModel(DualEncoderModel):
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         return self.tower(tokenized_documents)
-    
+
     def model_hyperparameters(self):
         return self._model_hyperparameters
 
@@ -335,7 +341,7 @@ def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
             )
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
-        
+
 if __name__ == "__main__":
     query = "What is the weather like in New York City?"
 

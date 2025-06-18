@@ -5,6 +5,9 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional
 import ast
 import logging
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from model import models
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
