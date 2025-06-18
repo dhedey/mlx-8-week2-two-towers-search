@@ -1,12 +1,14 @@
 import streamlit as st
 import redis
 import os
+import numpy as np
+from typing import List, Dict, Tuple
 
 # Redis connection
 redis_host = os.getenv('REDIS_HOST', 'localhost')
 redis_port = int(os.getenv('REDIS_PORT', 6379))
 
-st.title("Redis Testing Interface")
+st.title("Document Search Interface")
 
 # Initialize Redis connection
 try:
@@ -17,56 +19,117 @@ except redis.ConnectionError as e:
     redis_client = None
 
 if redis_client:
-    # Test Redis Operations
-    st.header("Test Redis Operations")
+    # Document Search Section
+    st.header("Document Search")
 
-    # Set/Get Test
-    st.subheader("Set/Get Test")
-    test_key = st.text_input("Enter a key for testing:", "test_key")
-    test_value = st.text_input("Enter a value for testing:", "test_value")
+    # Dummy Data Management
+    st.subheader("Dummy Data Management")
 
-    if st.button("Test Set/Get"):
+    # Function to generate dummy embeddings
+    def generate_dummy_embedding() -> List[float]:
+        return np.random.randn(128).tolist()  # 128-dimensional embedding
+
+    # Function to store dummy document
+    def store_dummy_document(doc_id: str, content: str, embedding: List[float]):
+        # Store document content
+        redis_client.hset(f"doc:{doc_id}", mapping={
+            "content": content,
+            "embedding": str(embedding)  # Convert list to string for storage
+        })
+
+    # Function to get all documents
+    def get_all_documents() -> List[Dict]:
+        docs = []
+        for key in redis_client.keys("doc:*"):
+            doc_data = redis_client.hgetall(key)
+            if doc_data:
+                doc_id = key.split(":")[1]
+                embedding = eval(doc_data["embedding"])  # Convert string back to list
+                docs.append({
+                    "id": doc_id,
+                    "content": doc_data["content"],
+                    "embedding": embedding
+                })
+        return docs
+
+    # Function to search documents
+    def search_documents(query_embedding: List[float], top_k: int = 5) -> List[Tuple[str, float]]:
+        docs = get_all_documents()
+        if not docs:
+            return []
+
+        # Calculate cosine similarity
+        similarities = []
+        for doc in docs:
+            similarity = np.dot(query_embedding, doc["embedding"]) / (
+                np.linalg.norm(query_embedding) * np.linalg.norm(doc["embedding"])
+            )
+            similarities.append((doc["id"], doc["content"], similarity))
+
+        # Sort by similarity and return top k
+        similarities.sort(key=lambda x: x[2], reverse=True)
+        return similarities[:top_k]
+
+    # UI for adding dummy documents
+    st.write("Add Dummy Documents")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        doc_id = st.text_input("Document ID:", "doc1")
+        doc_content = st.text_area("Document Content:", "This is a sample document about machine learning.")
+
+    with col2:
+        if st.button("Add Dummy Document"):
+            try:
+                embedding = generate_dummy_embedding()
+                store_dummy_document(doc_id, doc_content, embedding)
+                st.success(f"Successfully added document {doc_id}")
+            except Exception as e:
+                st.error(f"Error adding document: {str(e)}")
+
+    # Search Interface
+    st.subheader("Search Documents")
+    search_query = st.text_input("Enter your search query:", "machine learning")
+
+    if st.button("Search"):
         try:
-            redis_client.set(test_key, test_value)
-            retrieved_value = redis_client.get(test_key)
-            st.success(f"Successfully set and retrieved value: {retrieved_value}")
+            # Generate a dummy embedding for the query (in a real app, this would come from your model)
+            query_embedding = generate_dummy_embedding()
+
+            # Search documents
+            results = search_documents(query_embedding)
+
+            if results:
+                st.write("Search Results:")
+                for doc_id, content, similarity in results:
+                    st.write(f"---")
+                    st.write(f"Document ID: {doc_id}")
+                    st.write(f"Content: {content}")
+                    st.write(f"Similarity Score: {similarity:.4f}")
+            else:
+                st.info("No documents found. Add some documents first!")
+
         except Exception as e:
-            st.error(f"Error during Set/Get test: {str(e)}")
+            st.error(f"Error during search: {str(e)}")
 
-    # List Operations Test
-    st.subheader("List Operations Test")
-    list_key = st.text_input("Enter a list key:", "test_list")
-    list_value = st.text_input("Enter a value to add to list:", "test_item")
-
-    if st.button("Test List Operations"):
-        try:
-            redis_client.lpush(list_key, list_value)
-            list_length = redis_client.llen(list_key)
-            list_items = redis_client.lrange(list_key, 0, -1)
-            st.success(f"List length: {list_length}")
-            st.write("List items:", list_items)
-        except Exception as e:
-            st.error(f"Error during List operations test: {str(e)}")
-
-    # Hash Operations Test
-    st.subheader("Hash Operations Test")
-    hash_key = st.text_input("Enter a hash key:", "test_hash")
-    hash_field = st.text_input("Enter a hash field:", "test_field")
-    hash_value = st.text_input("Enter a hash value:", "test_value")
-
-    if st.button("Test Hash Operations"):
-        try:
-            redis_client.hset(hash_key, hash_field, hash_value)
-            retrieved_hash = redis_client.hget(hash_key, hash_field)
-            st.success(f"Successfully set and retrieved hash value: {retrieved_hash}")
-        except Exception as e:
-            st.error(f"Error during Hash operations test: {str(e)}")
+    # Display all stored documents
+    st.subheader("Stored Documents")
+    if st.button("Show All Documents"):
+        docs = get_all_documents()
+        if docs:
+            for doc in docs:
+                st.write(f"---")
+                st.write(f"Document ID: {doc['id']}")
+                st.write(f"Content: {doc['content']}")
+        else:
+            st.info("No documents stored yet.")
 
     # Cleanup Section
     st.header("Cleanup")
-    if st.button("Clear All Test Data"):
+    if st.button("Clear All Documents"):
         try:
-            redis_client.delete(test_key, list_key, hash_key)
-            st.success("Successfully cleared test data")
+            for key in redis_client.keys("doc:*"):
+                redis_client.delete(key)
+            st.success("Successfully cleared all documents")
         except Exception as e:
             st.error(f"Error during cleanup: {str(e)}")
