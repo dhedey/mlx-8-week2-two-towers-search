@@ -3,47 +3,30 @@ import redis
 import os
 import numpy as np
 import torch
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from model import models
+
+from model.models import load_model_for_evaluation
 from model.common import TrainingHyperparameters
 
 # Constants
 DEFAULT_EMBEDDING_SIZE = 128
 DEFAULT_TOP_K = 5
 
-# Initialize model parameters
-MODEL_PARAMETERS = models.PooledTwoTowerModelHyperparameters(
-    tokenizer="week1-word2vec",
-    comparison_embedding_size=DEFAULT_EMBEDDING_SIZE,
-    query_tower_hidden_dimensions=[256, 128],
-    doc_tower_hidden_dimensions=[256, 128],
-    include_layer_norms=True
-)
-
-# Initialize training parameters
-TRAINING_PARAMETERS = TrainingHyperparameters(
-    initial_token_embeddings_kind="random",
-    freeze_embeddings=True,
-    dropout=0.1,
-    batch_size=32,
-    epochs=1,
-    learning_rate=0.001,
-    margin=0.1
-)
+# Available models
+AVAILABLE_MODELS = [
+    "two-tower-boosted-word2vec-linear",
+    "one-tower-boosted-word2vec-linear"
+]
 
 class SearchApp:
-    def __init__(self):
+    def __init__(self, model_name: str):
         self.redis_client = redis.Redis(
             host=os.getenv('REDIS_HOST', 'localhost'),
             port=int(os.getenv('REDIS_PORT', 6379)),
             decode_responses=True
         )
-        self.model = models.PooledTwoTowerModel(
-            training_parameters=TRAINING_PARAMETERS,
-            model_parameters=MODEL_PARAMETERS
-        )
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(model_name)
+        self.model = load_model_for_evaluation(model_name)
         self.model.to(self.device)
         self.model.eval()
 
@@ -88,15 +71,14 @@ class SearchApp:
 def main():
     st.title("Document Search")
 
-    # Initialize the search app
-    app = SearchApp()
-
-    # Model selection dropdown (currently only one option)
-    st.selectbox(
+    # Model selection dropdown
+    selected_model = st.selectbox(
         "Select Model",
-        ["PooledTwoTowerModel"],
-        disabled=True
+        AVAILABLE_MODELS
     )
+
+    # Initialize the search app with selected model
+    app = SearchApp(selected_model)
 
     # Search query input
     query = st.text_input("Enter your search query:")
