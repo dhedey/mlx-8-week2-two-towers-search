@@ -3,6 +3,13 @@ import redis
 import os
 import numpy as np
 import torch
+import sys
+from pathlib import Path
+
+# Add project root to Python path
+project_root = str(Path(__file__).parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 from model.models import load_model_for_evaluation
 from model.common import TrainingHyperparameters

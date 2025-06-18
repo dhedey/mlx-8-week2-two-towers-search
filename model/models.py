@@ -12,8 +12,8 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters, select_device
-from tokenizer import get_tokenizer, TokenizerBase
+from model.common import TrainingHyperparameters, ModelLoader, select_device
+from model.tokenizer import Word2VecTokenizer, TokenizerBase
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
