@@ -356,8 +356,9 @@ if __name__ == "__main__":
 
     for model_name in model_names:
 
+        print("==========================")
         print(f"Loading model {model_name}...")
-        model = load_model_for_evaluation("fixed-boosted-word2vec-linear")
+        model = load_model_for_evaluation(model_name)
 
         print(f"Previous validation metrics for {model_name}:")
         print(model.validation_metrics)
@@ -386,3 +387,4 @@ if __name__ == "__main__":
             document = result["document"]
             similarity = result["similarity"]
             print(f"Similarity: {similarity:.3f} | Document: {document}")
+        print()
