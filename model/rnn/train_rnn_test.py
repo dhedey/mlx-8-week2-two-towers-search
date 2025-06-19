@@ -56,12 +56,14 @@ class Word2VecTokenizer(TokenizerBase):
     @classmethod
     def load(cls):
         folder = os.path.dirname(__file__)
-        word_vectors = torch.load(folder + '/word_vectors.pt')
+        # Go up one directory to access the data folder
+        data_folder = os.path.join(os.path.dirname(folder), 'data')
+        word_vectors = torch.load(os.path.join(data_folder, 'week-1-word2vec-word-vectors.pt'), weights_only=False)
 
         # Implement boosting
         import pandas as pd
         import math
-        word_counts = pd.read_csv(folder + '/word_counts.csv')
+        word_counts = pd.read_csv(os.path.join(data_folder, 'week-1-word2vec-word-counts.csv'))
         word_counts = {
             row["word"]: row["count"]
             for index, row in word_counts.iterrows()

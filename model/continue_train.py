@@ -14,7 +14,7 @@ import pandas as pd
 import argparse
 import math
 from common import TrainingHyperparameters, select_device
-from models import PooledTwoTowerModelHyperparameters, PooledTwoTowerModel
+from models import PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel
 from trainer import ModelTrainer
 
 if __name__ == "__main__":
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--model',
         type=str,
-        default="fixed-boosted-word2vec-linear",
+        default="fixed-boosted-word2vec-pooled",
     )
     parser.add_argument(
         '--end-epoch',
@@ -37,12 +37,18 @@ if __name__ == "__main__":
     override_to_epoch = args.end_epoch
 
     match model_name:
-        case "fixed-boosted-word2vec-linear":
+        case "fixed-boosted-word2vec-pooled":
             continuation = PooledTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "learned-boosted-word2vec-linear":
+        case "learned-boosted-word2vec-pooled":
             continuation = PooledTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "learned-boosted-mini-lm-linear":
+        case "learned-boosted-mini-lm-pooled":
             continuation = PooledTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
+        case "fixed-boosted-word2vec-rnn":
+            continuation = RNNTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
+        case "learned-boosted-word2vec-rnn":
+            continuation = RNNTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
+        case "learned-boosted-mini-lm-rnn":
+            continuation = RNNTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
