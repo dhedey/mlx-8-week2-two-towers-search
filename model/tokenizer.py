@@ -19,7 +19,13 @@ class TokenizerBase:
 
     def generate_default_embeddings(self, kind) -> torch.Tensor:
         """
-        Generate default embeddings based on the kind specified. A kind of "zeroes" must be supported, as a minimum.
+        Generate default embeddings based on the kind specified. A kind of "zeros" must be supported, as a minimum.
+        """
+        raise NotImplementedError("This method should be implemented by subclasses.")
+
+    def generate_default_embedding_boosts(self, kind) -> torch.Tensor:
+        """
+        Generate default token embedding boosts based on the kind specified. A kind of "ones" must be supported, as a minimum.
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
@@ -32,7 +38,7 @@ class Word2VecTokenizer(TokenizerBase):
     @classmethod
     def load(cls):
         folder = os.path.dirname(__file__)
-        word_vectors = torch.load(folder + '/word_vectors.pt')
+        word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt')
 
         embeddings_shape = word_vectors["embeddings"].shape
         print(f"Word2Vec Tokenizer loaded. Vocabulary size {embeddings_shape[0]}, Embedding size: {embeddings_shape[1]}")
@@ -50,16 +56,29 @@ class Word2VecTokenizer(TokenizerBase):
 
     def generate_default_embeddings(self, kind):
         match kind:
-            case "word2vec":
+            case "default":
                 return self.loaded_token_embeddings
-            case "word2vec-boosted":
+            case "random":
+                return torch.randn_like(self.loaded_token_embeddings, dtype=torch.float32)
+            case "zeros":
+                return torch.zeros_like(self.loaded_token_embeddings, dtype=torch.float32)
+            case _:
+                raise ValueError(f"Unknown embedding kind: {kind}")
+            
+    def generate_default_embedding_boosts(self, kind):
+        shape = [self.loaded_token_embeddings.shape[0]]
+        match kind:
+            case "ones":
+                return torch.ones(shape, dtype=torch.float32)
+            case "zeros":
+                return torch.zeros(shape, dtype=torch.float32)
+            case "sqrt-inverse-frequency":
                 folder = os.path.dirname(__file__)
-                word_counts = pd.read_csv(folder + '/word_counts.csv')
+                word_counts = pd.read_csv(folder + '/data/week-1-word2vec-word-counts.csv')
                 word_counts = {
                     row["word"]: row["count"]
                     for index, row in word_counts.iterrows()
                 }
-
                 def generate_shrink_factor(word):
                     MIN_APPEARANCE_THRESHOLD = 10
 
@@ -71,13 +90,64 @@ class Word2VecTokenizer(TokenizerBase):
                     inverse_freqency = 10 / appearance_count # Between 0 and 1
 
                     return math.sqrt(inverse_freqency)
-                return torch.stack([
-                    word_embedding * generate_shrink_factor(word)
-                    for (word_embedding, word) in zip(self.loaded_token_embeddings, self.words)
-                ])
+
+                return torch.tensor([generate_shrink_factor(word) for word in self.words], dtype=torch.float32)
+            case _:
+                raise ValueError(f"Unknown embedding boost kind: {kind}")
+
+@dataclass
+class PretrainedTokenizer(TokenizerBase):
+    tokenizer: transformers.PreTrainedTokenizer
+    loaded_token_embeddings: torch.Tensor
+
+    @classmethod
+    def load(cls, model_name="sentence-transformers/all-MiniLM-L6-v2"):
+        print(f"Loading pretrained tokenizer and embeddings for {model_name}...")
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+        model: transformers.PreTrainedModel = transformers.AutoModel.from_pretrained(model_name)
+
+        with torch.no_grad():
+            embeddings = model.get_input_embeddings().weight
+
+        print(f"Pretrained Tokenizer for {model_name} loaded. Vocabulary size {embeddings.shape[0]}, Embedding size: {embeddings.shape[1]}")
+
+        return cls(
+            tokenizer=tokenizer,
+            loaded_token_embeddings=embeddings,
+        )
+    
+    def tokenize(self, string):
+        return self.tokenizer.encode(string)
+
+    def generate_default_embeddings(self, kind):
+        match kind:
+            case "default":
+                return self.loaded_token_embeddings
             case "random":
                 return torch.randn_like(self.loaded_token_embeddings, dtype=torch.float32)
-            case "zeroes":
+            case "zeros":
                 return torch.zeros_like(self.loaded_token_embeddings, dtype=torch.float32)
             case _:
                 raise ValueError(f"Unknown embedding kind: {kind}")
+
+    def generate_default_embedding_boosts(self, kind):
+        shape = [self.loaded_token_embeddings.shape[0]]
+        match kind:
+            case "ones":
+                return torch.ones(shape, dtype=torch.float32)
+            case "zeros":
+                return torch.zeros(shape, dtype=torch.float32)
+            case _:
+                raise ValueError(f"Unknown embedding boost kind: {kind}")
+            
+
+def get_tokenizer(tokenizer_name: str) -> TokenizerBase:
+    if tokenizer_name.startswith("pretrained:"):
+        model_name = tokenizer_name[len("pretrained:"):]
+        return PretrainedTokenizer.load(model_name=model_name)
+
+    match tokenizer_name:
+        case "week1-word2vec":
+            return Word2VecTokenizer.load()
+        case _:
+            raise ValueError(f"Unknown tokenizer: {tokenizer_name}")

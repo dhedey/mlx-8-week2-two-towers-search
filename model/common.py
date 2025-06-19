@@ -19,8 +19,10 @@ class TrainingHyperparameters:
     epochs: int
     learning_rate: float
     freeze_embeddings: bool
+    freeze_embedding_boosts: bool
     dropout: float
     initial_token_embeddings_kind: str
+    initial_token_embeddings_boost_kind: str
     margin: float
 
     @classmethod
@@ -30,13 +32,19 @@ class TrainingHyperparameters:
             epochs=0,
             learning_rate=0,
             freeze_embeddings=True,
+            freeze_embedding_boosts=True,
             dropout=0,
             margin=0,
-            initial_token_embeddings_kind="zeroes",
+            initial_token_embeddings_kind="zeros",
+            initial_token_embeddings_boost_kind="ones",
         )
 
     def to_dict(self):
         return vars(self)
+    
+    @classmethod
+    def from_dict(cls, d):
+        return cls(**d)
     
 def select_device():
     DEVICE_IF_MPS_SUPPORT = 'cpu' # or 'mps' - but it doesn't work well with EmbeddingBag

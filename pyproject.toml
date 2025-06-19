@@ -2,7 +2,7 @@
 name = "mlx-8-week2-two-towers-search"
 version = "0.1.0"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.10.3",
     "numpy>=2.2.6",

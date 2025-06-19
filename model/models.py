@@ -12,8 +12,8 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters
-from tokenizer import Word2VecTokenizer, TokenizerBase
+from common import TrainingHyperparameters, select_device
+from tokenizer import get_tokenizer, TokenizerBase
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
@@ -21,6 +21,7 @@ def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
     flattened_tokens = []
     offsets = []
+    mean_weights = []
     current_offset = 0
 
     for tokens in tokens_list:
@@ -28,26 +29,38 @@ def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
         flattened_tokens.extend(tokens)
         current_offset += len(tokens)
 
+        if len(tokens) > 0:
+            mean_weight = 1/len(tokens)
+            mean_weights.extend(mean_weight for _ in tokens)
+
+
     return [
         torch.tensor(flattened_tokens, dtype=torch.long).to(device),
         torch.tensor(offsets, dtype=torch.long).to(device),
+        torch.tensor(mean_weights, dtype=torch.float).to(device),
     ]
     
 class PooledTowerModel(nn.Module):
     def __init__(
             self,
             default_token_embeddings: torch.Tensor,
+            default_token_embedding_boosts: torch.Tensor,
             training_parameters: TrainingHyperparameters,
             hidden_layer_sizes: list[int],
             include_layer_norms: bool,
             output_size: int,
         ):
         super(PooledTowerModel, self).__init__()
-        self.average_pooling = nn.EmbeddingBag.from_pretrained(
+        self.embedding_boosts = nn.Embedding.from_pretrained(
+            embeddings=default_token_embedding_boosts.unsqueeze(dim=1), # Expand to an (E, 1) shape
+            freeze=training_parameters.freeze_embedding_boosts,
+        )
+        self.embedding_sum = nn.EmbeddingBag.from_pretrained(
             embeddings=default_token_embeddings,
             freeze=training_parameters.freeze_embeddings,
-            mode='mean',
+            mode='sum', # NOTE: To use the embedding boosts, we have to use `sum`, so we apply the mean later on
         )
+
         dimension_sizes = hidden_layer_sizes
 
         input_sizes = [default_token_embeddings.shape[1]] + dimension_sizes
@@ -62,9 +75,14 @@ class PooledTowerModel(nn.Module):
 
     def forward(self, tokens: list[list[int]]):
         device = next(self.parameters()).device
-        flattened_tokens, offsets = prepare_tokens_for_embedding_bag(tokens, device)
+        flattened_tokens, offsets, mean_weighting = prepare_tokens_for_embedding_bag(tokens, device)
+        per_token_boosts = self.embedding_boosts(flattened_tokens).squeeze(dim=1)
 
-        x = self.average_pooling(flattened_tokens, offsets)
+        x = self.embedding_sum(
+            flattened_tokens,
+            offsets,
+            per_sample_weights=per_token_boosts * mean_weighting,
+        )
         x = self.hidden_layers(x)
         x = self.output_layer(x)
 
@@ -88,9 +106,16 @@ class HiddenLayer(nn.Module):
         return x
 
 class DualEncoderModel(nn.Module):
+    validation_metrics = None
+
     """A base class for all our dual encoder models."""
-    def __init__(self):
+    def __init__(self, model_name: str, training_parameters: TrainingHyperparameters):
         super(DualEncoderModel, self).__init__()
+        self.model_name = model_name
+        self.training_parameters = training_parameters
+
+    def get_device(self):
+        return next(self.parameters()).device
 
     def tokenize_query(self, query: str) -> list[int]:
         raise NotImplementedError("This method should be implemented by subclasses.")
@@ -106,6 +131,82 @@ class DualEncoderModel(nn.Module):
     
     def model_hyperparameters(self):
         raise NotImplementedError("This method should be implemented by subclasses.")
+    
+    @classmethod
+    def hyper_parameters_class(cls):
+        # e.g. return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
+        raise NotImplementedError("This class method should be implemented by subclasses.")
+
+    @classmethod
+    def load_for_evaluation(cls, model_name: str, device):
+        model_loader = ModelLoader()
+        loaded_model_data = model_loader.load_model_data(
+            model_name=model_name,
+            model_parameters_class=cls.hyper_parameters_class(),
+            device=device,
+        )
+        model = cls(
+            model_name=model_name,
+            training_parameters=TrainingHyperparameters.for_prediction(),
+            model_parameters=loaded_model_data["model_parameters"],
+        ).to(device)
+        model.load_state_dict(loaded_model_data["model"])
+        model.eval()
+        model.validation_metrics = loaded_model_data["validation_metrics"]
+
+        return model
+    
+    @classmethod
+    def load_to_continue_training(cls, model_name: str, device):
+        model_loader = ModelLoader()
+        loaded_model_data = model_loader.load_model_data(
+            model_name=model_name,
+            model_parameters_class=cls.hyper_parameters_class(),
+            device=device,
+        )
+        model = cls(
+            model_name=model_name,
+            training_parameters=TrainingHyperparameters.from_dict(loaded_model_data["training_parameters"]),
+            model_parameters=loaded_model_data["model_parameters"],
+        ).to(device)
+        model.load_state_dict(loaded_model_data["model"])
+        model.train()
+        model.validation_metrics = loaded_model_data["validation_metrics"]
+
+        return {
+            "model": model,
+            "optimizer_state": loaded_model_data["optimizer_state"],
+            "epoch": loaded_model_data["epoch"],
+        }
+
+class ModelLoader:
+    def __init__(self):
+        self.folder = os.path.dirname(__file__)
+
+    def save_model_data(self, model: DualEncoderModel, optimizer, epoch):
+        location = self.model_location(model.model_name)
+        torch.save({
+            "model": model.state_dict(),
+            "training_parameters": model.training_parameters.to_dict(),
+            "model_parameters": model.model_hyperparameters(),
+            "validation_metrics": model.validation_metrics,
+            "optimizer_state": optimizer.state_dict(),
+            "epoch": epoch,
+        }, location)
+        print(f"Model saved to {location}")
+
+    def load_model_data(self, model_name, model_parameters_class, device):
+        torch.serialization.add_safe_globals([model_parameters_class])
+
+        model_location = self.model_location(model_name)
+        loaded_data = torch.load(model_location, map_location=device)
+
+        print(f"Loaded model {model_name}")
+
+        return loaded_data
+
+    def model_location(self, model_name):
+        return os.path.join(self.folder, "data", f"{model_name}.pt")
 
 @dataclass
 class PooledTwoTowerModelHyperparameters:
@@ -121,15 +222,12 @@ class PooledTwoTowerModelHyperparameters:
 class PooledTwoTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
 
-    def __init__(self, training_parameters: TrainingHyperparameters, model_parameters: PooledTwoTowerModelHyperparameters):
-        super(PooledTwoTowerModel, self).__init__()
+    def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PooledTwoTowerModelHyperparameters):
+        super(PooledTwoTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
 
-        match model_parameters.tokenizer:
-            case "week1-word2vec":
-                tokenizer = Word2VecTokenizer.load()
-                default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
-            case _:
-                raise ValueError(f"Unknown tokenizer: {model_parameters.tokenizer}")
+        tokenizer = get_tokenizer(model_parameters.tokenizer)
+        default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+        default_token_embedding_boosts = tokenizer.generate_default_embedding_boosts(training_parameters.initial_token_embeddings_boost_kind)
             
         self.tokenizer = tokenizer
 
@@ -139,6 +237,7 @@ class PooledTwoTowerModel(DualEncoderModel):
             output_size=model_parameters.comparison_embedding_size,
             include_layer_norms=model_parameters.include_layer_norms,
             default_token_embeddings=default_token_embeddings,
+            default_token_embedding_boosts=default_token_embedding_boosts,
         )
         self.document_tower=PooledTowerModel(
             training_parameters=training_parameters,
@@ -146,8 +245,13 @@ class PooledTwoTowerModel(DualEncoderModel):
             output_size=model_parameters.comparison_embedding_size,
             include_layer_norms=model_parameters.include_layer_norms,
             default_token_embeddings=default_token_embeddings,
+            default_token_embedding_boosts=default_token_embedding_boosts,
         )
         self._model_hyperparameters = model_parameters
+    
+    @classmethod
+    def hyper_parameters_class(cls):
+        return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
 
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
@@ -164,3 +268,123 @@ class PooledTwoTowerModel(DualEncoderModel):
     def model_hyperparameters(self):
         return self._model_hyperparameters
 
+@dataclass
+class PooledOneTowerModelHyperparameters:
+    tokenizer: str
+    comparison_embedding_size: int
+    hidden_dimensions: list[int]
+    include_layer_norms: bool
+
+    def to_dict(self):
+        return vars(self)
+
+class PooledOneTowerModel(DualEncoderModel):
+    tokenizer: TokenizerBase
+
+    def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PooledOneTowerModelHyperparameters):
+        super(PooledOneTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
+
+        tokenizer = get_tokenizer(model_parameters.tokenizer)
+        default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+        default_token_embedding_boosts = tokenizer.generate_default_embedding_boosts(training_parameters.initial_token_embeddings_boost_kind)
+            
+        self.tokenizer = tokenizer
+
+        self.tower=PooledTowerModel(
+            training_parameters=training_parameters,
+            hidden_layer_sizes=model_parameters.hidden_dimensions,
+            output_size=model_parameters.comparison_embedding_size,
+            include_layer_norms=model_parameters.include_layer_norms,
+            default_token_embeddings=default_token_embeddings,
+            default_token_embedding_boosts=default_token_embedding_boosts,
+        )
+        self._model_hyperparameters = model_parameters
+
+    @classmethod
+    def hyper_parameters_class(cls):
+        return (PooledOneTowerModelHyperparameters, "models.PooledOneTowerModelHyperparameters")
+
+    def tokenize_query(self, query: str) -> list[int]:
+        return self.tokenizer.tokenize(query)
+    
+    def tokenize_document(self, document: str) -> list[int]:
+        return self.tokenizer.tokenize(document)
+
+    def embed_tokenized_queries(self, tokenized_queries: list[list[int]]):
+        return self.tower(tokenized_queries)
+
+    def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
+        return self.tower(tokenized_documents)
+    
+    def model_hyperparameters(self):
+        return self._model_hyperparameters
+
+def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
+    device = select_device()
+    match model_name:
+        case "fixed-boosted-word2vec-linear":
+            return PooledTwoTowerModel.load_for_evaluation(
+                model_name=model_name,
+                device=device,
+            )
+        case "learned-boosted-mini-lm-linear":
+            return PooledTwoTowerModel.load_for_evaluation(
+                model_name=model_name,
+                device=device,
+            )
+        case _:
+            raise ValueError(f"Unknown model name: {model_name}")
+        
+if __name__ == "__main__":
+    query = "What is the weather like in New York City?"
+
+    documents = [
+        "My name is John Doe and I live in New York City.",
+        "I am a software engineer with a passion for machine learning.",
+        "The weather in New York City is often unpredictable.",
+        "I enjoy hiking and exploring new places on weekends.",
+        "My favorite programming language is Python, especially for data science tasks."
+    ]
+
+    model_names = [
+        "fixed-boosted-word2vec-linear",
+        "learned-boosted-mini-lm-linear",
+    ]
+
+    print(f"Showing different model results for query: {query}")
+    print()
+
+    for model_name in model_names:
+
+        print("==========================")
+        print(f"Loading model {model_name}...")
+        model = load_model_for_evaluation(model_name)
+
+        print(f"Previous validation metrics for {model_name}:")
+        print(model.validation_metrics)
+
+        document_embeddings = model.embed_tokenized_documents(
+            [model.tokenize_document(doc) for doc in documents]
+        )
+
+        query_embedding = model.embed_tokenized_queries(
+            [model.tokenize_query(query)]
+        )
+
+        similarities = [
+            {
+                "document": documents[index],
+                "similarity": score.item()
+            }
+            for (index, score) in enumerate(F.cosine_similarity(query_embedding, document_embeddings))
+        ]
+        ordered_results = sorted(similarities, key=lambda x: x["similarity"], reverse=True)
+
+        print()
+        print(f"Example results for query: {query}")
+        print()
+        for result in ordered_results:
+            document = result["document"]
+            similarity = result["similarity"]
+            print(f"Similarity: {similarity:.3f} | Document: {document}")
+        print()

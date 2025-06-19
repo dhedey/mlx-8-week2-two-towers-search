@@ -11,5 +11,8 @@ cd ~
 git clone https://github.com/dhedey/mlx-8-week2-two-towers-search
 cd mlx-8-week2-two-towers-search
 
-# uv run ./model/train.py --batch-size 1024
-# uv run ./model/sweep.py --count 20
+# Change if you're someone else!
+git config --global user.email "mli@david-edey.com"
+git config --global user.name "David Edey"
+
+# uv run ./model/start_train.py

@@ -12,8 +12,8 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters
-from model import DualEncoderModel
+import wandb
+from models import DualEncoderModel, ModelLoader
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -80,17 +80,35 @@ def process_test_batch(batch, negative_samples, model: DualEncoderModel, margin)
     }
 
 class ModelTrainer:
-    def __init__(self, model: DualEncoderModel, training_parameters: TrainingHyperparameters):
+    def __init__(
+            self,
+            model: DualEncoderModel,
+            start_epoch = None,
+            start_optimizer_state = None,
+            override_to_epoch: int = None,
+            validate_and_save_after_epochs: int = 5,
+        ):
+        torch.manual_seed(42)
+
         datasets.config.IN_MEMORY_MAX_SIZE = 8 * 1024 * 1024 # 8GB
         dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1")
 
         self.model = model
-        self.training_parameters = training_parameters
+        self.validate_and_save_after_epochs = validate_and_save_after_epochs
 
-        print("Preparing model for training...")
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
 
-        print("Tokenizing queries and passages...")
+        if start_epoch is not None:
+            assert start_optimizer_state is not None, "If start epoch is provided, optimizer state must also be provided"
+            self.epoch = start_epoch
+            self.optimizer.load_state_dict(start_optimizer_state)
+            print(f"Resuming training from epoch {self.epoch}")
+
+        if override_to_epoch is not None:
+            self.model.training_parameters.epochs = override_to_epoch
+            print(f"Overriding training end epoch to {self.model.training_parameters.epochs}")
+
+        print("Pre-tokenizing queries and documents...")
         train_dataset = dataset["train"].map(
             lambda x: {
                 "tokenized_query": model.tokenize_query(x["query"]),
@@ -101,7 +119,7 @@ class ModelTrainer:
 
         self.train_data_loader = DataLoader(
             train_dataset,
-            batch_size=training_parameters.batch_size,
+            batch_size=model.training_parameters.batch_size,
             shuffle=True,
             collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
         )
@@ -115,7 +133,7 @@ class ModelTrainer:
             })
         self.validation_data_loader = DataLoader(
             self.validation_dataset,
-            batch_size=training_parameters.batch_size,
+            batch_size=model.training_parameters.batch_size,
             collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
         )
 
@@ -130,15 +148,30 @@ class ModelTrainer:
         print("Beginning training...")
 
         self.epoch = 1
+        last_epoch_results = None
 
-        while self.epoch <= self.training_parameters.epochs:
-            print(f"Epoch {self.epoch}/{self.training_parameters.epochs}")
-            self.train_epoch()
-            self.validate()
+        while self.epoch <= self.model.training_parameters.epochs:
+            print(f"Epoch {self.epoch}/{self.model.training_parameters.epochs}")
+            last_epoch_results = self.train_epoch()
+            if self.epoch % self.validate_and_save_after_epochs == 0 or self.epoch == self.model.training_parameters.epochs:
+                self.model.validation_metrics = self.validate()
+
+                if wandb.run is not None:
+                    wandb.log({
+                        "epoch": self.epoch,
+                        "validation_any_relevant_result": self.model.validation_metrics["any_relevant_result"],
+                        "validation_reciprical_rank": self.model.validation_metrics["reciprical_rank"],
+                        "validation_average_relevance": self.model.validation_metrics["average_relevance"],
+                    })
             self.save_model()
             self.epoch += 1
 
         print("Training complete.")
+        return {
+            "total_epochs": self.model.training_parameters.epochs,
+            "validation": self.model.validation_metrics,
+            "last_epoch": last_epoch_results,
+        }
 
     def train_epoch(self):
         self.model.train()
@@ -147,12 +180,17 @@ class ModelTrainer:
         running_loss = 0.0
         running_samples = 0
         total_batches = len(self.train_data_loader)
+
+        epoch_loss = 0.0
+        epoch_samples = 0
         for batch_idx, raw_batch in enumerate(self.train_data_loader):
             self.optimizer.zero_grad()
-            batch_results = process_test_batch(raw_batch, self.negative_samples, self.model, self.training_parameters.margin)
+            batch_results = process_test_batch(raw_batch, self.negative_samples, self.model, self.model.training_parameters.margin)
             loss = batch_results["total_loss"]
             running_samples += batch_results["document_count"]
             running_loss += loss.item()
+            epoch_loss += loss.item()
+            epoch_samples += batch_results["document_count"]
 
             loss.backward()
             self.optimizer.step()
@@ -162,7 +200,13 @@ class ModelTrainer:
                 print(f"Epoch {self.epoch}, Batch {batch_num}/{total_batches}, Average Loss: {(running_loss / running_samples):.4f}")
                 running_loss = 0.0
                 running_samples = 0
-        print(f"Epoch {self.epoch} complete")
+
+        average_loss = epoch_loss / epoch_samples if epoch_samples > 0 else 0.0
+        print(f"Epoch {self.epoch} complete (Average Loss: {average_loss:.4f})")
+
+        return {
+            "average_loss": average_loss,
+        }
 
     def validate(self):
         print()
@@ -260,23 +304,29 @@ class ModelTrainer:
                     passage = document_index_to_document_text[document_index]
                     print(f"  => {document_ids} with score {score:.3f}: \"{passage}\"")
                 print()
+
+        any_relevant_result = statistics.mean(any_relevant_result_by_query)
+        reciprical_rank = statistics.mean(reciprical_ranks_of_first_relevant_result_by_query)
+        average_relevance = statistics.mean(average_relevance_by_query)
         
         print(f"Across the first {total_queries_to_consider} queries, we queried the top {k_samples} documents (from {distinct_document_count} docs across {distinct_query_count} queries):")
-        print(f"> Proportion with any relevant result     : {statistics.mean(any_relevant_result_by_query):.2%}")
-        print(f"> Reciprical rank of first relevant result: {statistics.mean(reciprical_ranks_of_first_relevant_result_by_query):.2%}")
-        print(f"> Average relevance of results            : {statistics.mean(average_relevance_by_query):.2%}")
+        print(f"> Proportion with any relevant result     : {any_relevant_result:.2%}")
+        print(f"> Reciprical rank of first relevant result: {reciprical_rank:.2%}")
+        print(f"> Average relevance of results            : {average_relevance:.2%}")
         print()
         print(f"Validation complete")
         print()
+
+        return {
+            "any_relevant_result": any_relevant_result,
+            "reciprical_rank": reciprical_rank,
+            "average_relevance": average_relevance,
+        }
     
     def save_model(self):
-        model_folder = os.path.dirname(__file__)
-        model_filename = 'model.pt'
-        torch.save({
-            "model": self.model.state_dict(),
-            "training_parameters": self.training_parameters.to_dict(),
-            "model_parameters": self.model.model_hyperparameters(),
-            "optimizer_state": self.optimizer.state_dict(),
-        }, os.path.join(model_folder, model_filename))
-        print(f"Model saved to {model_filename}.")
-        
+        model_loader = ModelLoader()
+        model_loader.save_model_data(
+            model=self.model,
+            optimizer=self.optimizer,
+            epoch=self.epoch,
+        )
