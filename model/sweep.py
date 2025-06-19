@@ -25,7 +25,7 @@ SWEEP_CONFIG = {
             'values': [128, 256]
         },
         'tokenizer': {
-            'values': ["week1-word2vec", "pretrained:sentence-transformers/all-MiniLM-L6-v2"]
+            'values': ["week1-word2vec", "pretrained:sentence-transformers/all-MiniLM-L6-v2", "pretrained:gpt2"]
         },
         "embeddings": {
             'values': ["default-frozen", "default-unfrozen", "learned"]
