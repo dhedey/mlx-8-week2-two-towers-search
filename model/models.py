@@ -455,6 +455,7 @@ class PooledOneTowerModel(DualEncoderModel):
     def model_hyperparameters(self):
         return self._model_hyperparameters
 
+
 def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
     device = select_device()
     match model_name:

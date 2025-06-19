@@ -14,6 +14,7 @@ import pandas as pd
 import math
 import wandb
 from models import DualEncoderModel, ModelLoader
+from typing import Optional
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -85,8 +86,9 @@ class ModelTrainer:
             model: DualEncoderModel,
             start_epoch = None,
             start_optimizer_state = None,
-            override_to_epoch: int = None,
-            validate_and_save_after_epochs: int = 5,
+            override_to_epoch: Optional[int] = None,
+            validate_after_epochs: int = 5,
+            immediate_validation: bool = False,
         ):
         torch.manual_seed(42)
 
@@ -94,7 +96,7 @@ class ModelTrainer:
         dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1")
 
         self.model = model
-        self.validate_and_save_after_epochs = validate_and_save_after_epochs
+        self.validate_and_save_after_epochs = validate_after_epochs
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
 
@@ -136,6 +138,10 @@ class ModelTrainer:
             batch_size=model.training_parameters.batch_size,
             collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
         )
+
+        if immediate_validation:
+            print("Immediate validation requested, validating model...")
+            self.model.validation_metrics = self.validate()
 
         print(f"Generating negative samples...")
         self.negative_samples = [
@@ -261,9 +267,19 @@ class ModelTrainer:
 
         print("Generating embeddings for validation data...")
         self.model.eval()
+
+        def batch_evaluation(data, method, batch_size=256):
+            """
+            Helper function to evaluate in batches to avoid memory issues.
+            """
+            embeddings = []
+            for i in range(0, len(data), batch_size):
+                batch = data[i:i + batch_size]
+                embeddings.append(method(batch))
+            return torch.cat(embeddings)
         
-        query_embeddings = self.model.embed_tokenized_queries(query_index_to_tokenized_query)
-        document_embeddings = self.model.embed_tokenized_documents(document_index_to_tokenized_doc)
+        query_embeddings = batch_evaluation(query_index_to_tokenized_query, self.model.embed_tokenized_queries)
+        document_embeddings = batch_evaluation(document_index_to_tokenized_doc, self.model.embed_tokenized_documents)
 
         k_samples = 5
         total_queries_to_consider = 1000
