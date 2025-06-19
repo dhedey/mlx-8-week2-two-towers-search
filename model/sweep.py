@@ -13,6 +13,8 @@ from models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, 
 from trainer import ModelTrainer
 from common import select_device
 
+PROJECT_NAME = "week2-two-towers"
+
 # Sweep configuration - equivalent to wandb_sweep.yaml but in Python
 SWEEP_CONFIG = {
     'method': 'bayes',  # Can be 'grid', 'random', or 'bayes'
@@ -196,9 +198,9 @@ def main():
     """
     import argparse
     
-    parser = argparse.ArgumentParser(description='Run hyperparameter sweeps for HackerNews model')
-    parser.add_argument('--project', default='hackernews-score-prediction',
-                        help='W&B project name (default: hackernews-score-prediction)')
+    parser = argparse.ArgumentParser(description='Run hyperparameter sweeps')
+    parser.add_argument('--project', default=PROJECT_NAME,
+                        help=f'W&B project name (default: {PROJECT_NAME})')
     parser.add_argument('--count', type=int, default=20,
                         help='Number of sweep runs (default: 20)')
     parser.add_argument('--sweep-id', type=str,

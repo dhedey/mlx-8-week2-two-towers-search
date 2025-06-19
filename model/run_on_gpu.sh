@@ -3,6 +3,8 @@
 apt-get update
 apt-get install git
 apt-get install git-lfs
+apt-get install tmux -y
+apt-get install nvtop -y
 git lfs install
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.local/bin/env
@@ -15,4 +17,17 @@ cd mlx-8-week2-two-towers-search
 git config --global user.email "mli@david-edey.com"
 git config --global user.name "David Edey"
 
+# Launches a new tmux session (with name sweep) the name is optional!
+# This session can survive even if you disconnect from SSH
+# => Ctrl+B enters command mode in tmux (then release ctrl)
+# ==> Ctrl+B (unclick Ctrl) then D detaches from the current tmux session
+# => Discover existing sessions with tmux ls
+# => Reattach to the last session with tmux a (short for attach)
+# => Reattach with tmux attach -t 0
+tmux new -s sweep
+
+# Check GPU usage with the nvtop command
+
+# Now run a script, e.g.
 # uv run ./model/start_train.py
+# uv run ./model/models.py
