@@ -12,8 +12,7 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters, ModelLoader
-from models import DualEncoderModel
+from models import DualEncoderModel, ModelLoader
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -82,9 +81,10 @@ def process_test_batch(batch, negative_samples, model: DualEncoderModel, margin)
 class ModelTrainer:
     def __init__(
             self,
-            model_name: str,
             model: DualEncoderModel,
-            training_parameters: TrainingHyperparameters,
+            start_epoch = None,
+            start_optimizer_state = None,
+            override_to_epoch: int = None,
             validate_and_save_after_epochs: int = 5,
         ):
         torch.manual_seed(42)
@@ -92,13 +92,20 @@ class ModelTrainer:
         datasets.config.IN_MEMORY_MAX_SIZE = 8 * 1024 * 1024 # 8GB
         dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1")
 
-        self.model_name = model_name
         self.model = model
-        self.training_parameters = training_parameters
         self.validate_and_save_after_epochs = validate_and_save_after_epochs
 
-        print("Preparing model for training...")
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
+
+        if start_epoch is not None:
+            assert start_optimizer_state is not None, "If start epoch is provided, optimizer state must also be provided"
+            self.epoch = start_epoch
+            self.optimizer.load_state_dict(start_optimizer_state)
+            print(f"Resuming training from epoch {self.epoch}")
+
+        if override_to_epoch is not None:
+            self.model.training_parameters.epochs = override_to_epoch
+            print(f"Overriding training end epoch to {self.model.training_parameters.epochs}")
 
         print("Pre-tokenizing queries and documents...")
         train_dataset = dataset["train"].map(
@@ -111,7 +118,7 @@ class ModelTrainer:
 
         self.train_data_loader = DataLoader(
             train_dataset,
-            batch_size=training_parameters.batch_size,
+            batch_size=model.training_parameters.batch_size,
             shuffle=True,
             collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
         )
@@ -125,7 +132,7 @@ class ModelTrainer:
             })
         self.validation_data_loader = DataLoader(
             self.validation_dataset,
-            batch_size=training_parameters.batch_size,
+            batch_size=model.training_parameters.batch_size,
             collate_fn=lambda x: x,  # Specify identity collate function (no magic batching which breaks)
         )
 
@@ -141,12 +148,12 @@ class ModelTrainer:
 
         self.epoch = 1
 
-        while self.epoch <= self.training_parameters.epochs:
-            print(f"Epoch {self.epoch}/{self.training_parameters.epochs}")
+        while self.epoch <= self.model.training_parameters.epochs:
+            print(f"Epoch {self.epoch}/{self.model.training_parameters.epochs}")
             self.train_epoch()
             if self.epoch % self.validate_and_save_after_epochs == 0:
-                validation_results = self.validate()
-                self.save_model(validation_results)
+                self.model.validation_metrics = self.validate()
+            self.save_model()
             self.epoch += 1
 
         print("Training complete.")
@@ -160,7 +167,7 @@ class ModelTrainer:
         total_batches = len(self.train_data_loader)
         for batch_idx, raw_batch in enumerate(self.train_data_loader):
             self.optimizer.zero_grad()
-            batch_results = process_test_batch(raw_batch, self.negative_samples, self.model, self.training_parameters.margin)
+            batch_results = process_test_batch(raw_batch, self.negative_samples, self.model, self.model.training_parameters.margin)
             loss = batch_results["total_loss"]
             running_samples += batch_results["document_count"]
             running_loss += loss.item()
@@ -290,14 +297,10 @@ class ModelTrainer:
             "average_relevance": average_relevance,
         }
     
-    def save_model(self, validation_metrics):
+    def save_model(self):
         model_loader = ModelLoader()
         model_loader.save_model_data(
-            model_name=self.model_name,
             model=self.model,
-            model_parameters=self.model.model_hyperparameters(),
-            training_parameters=self.training_parameters,
             optimizer=self.optimizer,
             epoch=self.epoch,
-            validation_metrics=validation_metrics,
         )

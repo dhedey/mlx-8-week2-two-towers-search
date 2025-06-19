@@ -109,6 +109,8 @@ class PretrainedTokenizer(TokenizerBase):
         with torch.no_grad():
             embeddings = model.get_input_embeddings().weight
 
+        print(f"Pretrained Tokenizer for {model_name} loaded. Vocabulary size {embeddings.shape[0]}, Embedding size: {embeddings.shape[1]}")
+
         return cls(
             tokenizer=tokenizer,
             loaded_token_embeddings=embeddings,

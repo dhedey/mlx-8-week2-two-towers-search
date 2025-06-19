@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--model',
         type=str,
-        default="two-tower-preboosted-word2vec-linear",
+        default="fixed-boosted-word2vec-linear",
     )
     args = parser.parse_args()
 
@@ -50,10 +50,10 @@ if __name__ == "__main__":
                 doc_tower_hidden_dimensions=[],
                 include_layer_norms=True,
                 tokenizer="week1-word2vec",
-                learn_embedding_boosts=False, # Pre-boosted
             )
 
             model = PooledTwoTowerModel(
+                model_name=model_name,
                 training_parameters=training_parameters,
                 model_parameters=model_parameters,
             )
@@ -77,6 +77,7 @@ if __name__ == "__main__":
                 tokenizer="pretrained:sentence-transformers/all-MiniLM-L6-v2",
             )
             model = PooledTwoTowerModel(
+                model_name=model_name,
                 training_parameters=training_parameters,
                 model_parameters=model_parameters,
             )
@@ -102,17 +103,14 @@ if __name__ == "__main__":
             )
 
             model = PooledTwoTowerModel(
+                model_name=model_name,
                 training_parameters=training_parameters,
                 model_parameters=model_parameters,
             )
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
-    trainer = ModelTrainer(
-        model_name=model_name,
-        model=model.to(device),
-        training_parameters=training_parameters,
-    )
+    trainer = ModelTrainer(model=model.to(device))
     trainer.train()
 
 

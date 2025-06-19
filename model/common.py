@@ -42,38 +42,13 @@ class TrainingHyperparameters:
     def to_dict(self):
         return vars(self)
     
+    @classmethod
+    def from_dict(cls, d):
+        return cls(**d)
+    
 def select_device():
     DEVICE_IF_MPS_SUPPORT = 'cpu' # or 'mps' - but it doesn't work well with EmbeddingBag
     device = torch.device('cuda' if torch.cuda.is_available() else DEVICE_IF_MPS_SUPPORT if torch.backends.mps.is_available() else 'cpu')
     
     print(f'Selected device: {device}')
     return device
-
-class ModelLoader:
-    def __init__(self):
-        self.folder = os.path.dirname(__file__)
-
-    def save_model_data(self, model_name, model, model_parameters, training_parameters, optimizer, epoch, validation_metrics):
-        location = self.model_location(model_name)
-        torch.save({
-            "model": model.state_dict(),
-            "training_parameters": training_parameters.to_dict(),
-            "model_parameters": model_parameters,
-            "optimizer_state": optimizer.state_dict(),
-            "epoch": epoch,
-            "validation_metrics": validation_metrics,
-        }, location)
-        print(f"Model saved to {location}")
-
-    def load_model_data(self, model_name, model_parameters_class, device):
-        torch.serialization.add_safe_globals([model_parameters_class])
-
-        model_location = self.model_location(model_name)
-        loaded_data = torch.load(model_location, map_location=device)
-
-        print(f"Loaded model {model_name}")
-
-        return loaded_data
-
-    def model_location(self, model_name):
-        return os.path.join(self.folder, "data", f"{model_name}.pt")
