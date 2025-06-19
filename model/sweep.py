@@ -15,7 +15,7 @@ from common import select_device
 
 # Sweep configuration - equivalent to wandb_sweep.yaml but in Python
 SWEEP_CONFIG = {
-    'method': 'random',  # Can be 'grid', 'random', or 'bayes'
+    'method': 'bayes',  # Can be 'grid', 'random', or 'bayes'
     'metric': {
         'name': 'final_validation_reciprical_rank',
         'goal': 'maximize'
@@ -134,7 +134,7 @@ def train_sweep_run():
         # Log final metrics (wandb.log is also called within train_model)
         wandb.log({
             "final_train_loss": results['last_epoch']['average_loss'],
-            "epochs_completed": results['epochs_completed'],
+            "total_epochs": results['total_epochs'],
             "final_validation_reciprical_rank": results['validation']["reciprical_rank"],
             "final_validation_any_relevant_result": results['validation']["any_relevant_result"],
             "final_validation_average_relevance": results['validation']["average_relevance"],

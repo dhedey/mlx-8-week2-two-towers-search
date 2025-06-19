@@ -381,7 +381,7 @@ if __name__ == "__main__":
         ordered_results = sorted(similarities, key=lambda x: x["similarity"], reverse=True)
 
         print()
-        print(f"Example results for query")
+        print(f"Example results for query: {query}")
         print()
         for result in ordered_results:
             document = result["document"]
