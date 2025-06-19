@@ -107,10 +107,38 @@ if __name__ == "__main__":
                 training_parameters=training_parameters,
                 model_parameters=model_parameters,
             )
+        case "learned-boosted-gemma-3-1b-linear":
+            training_parameters = TrainingHyperparameters(
+                batch_size=128,
+                epochs=20,
+                learning_rate=0.002,
+                dropout=0.3,
+                margin=0.4,
+                initial_token_embeddings_kind="default",
+                freeze_embeddings=True,
+                initial_token_embeddings_boost_kind="ones",
+                freeze_embedding_boosts=False, # Learn boosts
+            )
+
+            model_parameters = PooledTwoTowerModelHyperparameters(
+                comparison_embedding_size=64,
+                query_tower_hidden_dimensions=[],
+                doc_tower_hidden_dimensions=[],
+                include_layer_norms=True,
+                tokenizer="pretrained:google/gemma-3-1b-it",
+            )
+
+            model = PooledTwoTowerModel(
+                model_name=model_name,
+                training_parameters=training_parameters,
+                model_parameters=model_parameters,
+            )
         case _:
             raise ValueError(f"Unknown model name: {model_name}")
 
-    trainer = ModelTrainer(model=model.to(device))
+    trainer = ModelTrainer(
+        model=model.to(device),
+    )
     trainer.train()
 
 

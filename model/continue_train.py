@@ -31,6 +31,11 @@ if __name__ == "__main__":
         type=int,
         default=None,
     )
+    parser.add_argument(
+        '--immediate-validation',
+        type=bool,
+        default=False,
+    )
     args = parser.parse_args()
 
     model_name = args.model
@@ -51,6 +56,7 @@ if __name__ == "__main__":
         start_epoch=continuation["epoch"] + 1,
         start_optimizer_state=continuation["optimizer_state"],
         override_to_epoch=override_to_epoch,
+        immediate_validation=args.immediate_validation,
     )
     trainer.train()
 

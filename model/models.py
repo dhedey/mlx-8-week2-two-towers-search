@@ -318,33 +318,6 @@ class PooledOneTowerModel(DualEncoderModel):
     
     def model_hyperparameters(self):
         return self._model_hyperparameters
-    
-@dataclass
-class PretrainedSentenceEmbeddingModelHyperparameters:
-    transformers_name: str
-
-class PretrainedSentenceEmbeddingModel(DualEncoderModel):
-    def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PretrainedSentenceEmbeddingModelHyperparameters):
-        super(PretrainedSentenceEmbeddingModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
-
-        self.tokenizer: transformers.PreTrainedTokenizer = transformers.AutoConfig.from_pretrained(model_parameters.transformers_name)
-        self.model: transformers.PreTrainedModel = transformers.AutoModel.from_pretrained(model_parameters.transformers_name)
-        self._model_hyperparameters = model_parameters
-
-    def tokenize_query(self, query: str) -> list[int]:
-        return self.tokenizer.encode(query)
-    
-    def tokenize_document(self, document: str) -> list[int]:
-        return self.tokenizer.encode(document)
-
-    def embed_tokenized_queries(self, tokenized_queries: list[list[int]]):
-        return self.tower(tokenized_queries)
-
-    def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
-        return self.tower(tokenized_documents)
-    
-    def model_hyperparameters(self):
-        return self._model_hyperparameters
 
 
 def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
