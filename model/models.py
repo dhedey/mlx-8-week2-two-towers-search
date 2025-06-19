@@ -13,7 +13,7 @@ import random
 import pandas as pd
 import math
 from common import TrainingHyperparameters, ModelLoader, select_device
-from tokenizer import Word2VecTokenizer, TokenizerBase
+from tokenizer import get_tokenizer, TokenizerBase
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
@@ -21,6 +21,7 @@ def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
     flattened_tokens = []
     offsets = []
+    mean_weights = []
     current_offset = 0
 
     for tokens in tokens_list:
@@ -28,26 +29,38 @@ def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
         flattened_tokens.extend(tokens)
         current_offset += len(tokens)
 
+        if len(tokens) > 0:
+            mean_weight = 1/len(tokens)
+            mean_weights.extend(mean_weight for _ in tokens)
+
+
     return [
         torch.tensor(flattened_tokens, dtype=torch.long).to(device),
         torch.tensor(offsets, dtype=torch.long).to(device),
+        torch.tensor(mean_weights, dtype=torch.float).to(device),
     ]
     
 class PooledTowerModel(nn.Module):
     def __init__(
             self,
             default_token_embeddings: torch.Tensor,
+            default_token_embedding_boosts: torch.Tensor,
             training_parameters: TrainingHyperparameters,
             hidden_layer_sizes: list[int],
             include_layer_norms: bool,
             output_size: int,
         ):
         super(PooledTowerModel, self).__init__()
-        self.average_pooling = nn.EmbeddingBag.from_pretrained(
+        self.embedding_boosts = nn.Embedding.from_pretrained(
+            embeddings=default_token_embedding_boosts.unsqueeze(dim=1), # Expand to an (E, 1) shape
+            freeze=training_parameters.freeze_embedding_boosts,
+        )
+        self.embedding_sum = nn.EmbeddingBag.from_pretrained(
             embeddings=default_token_embeddings,
             freeze=training_parameters.freeze_embeddings,
-            mode='mean',
+            mode='sum', # NOTE: To use the embedding boosts, we have to use `sum`, so we apply the mean later on
         )
+
         dimension_sizes = hidden_layer_sizes
 
         input_sizes = [default_token_embeddings.shape[1]] + dimension_sizes
@@ -62,9 +75,14 @@ class PooledTowerModel(nn.Module):
 
     def forward(self, tokens: list[list[int]]):
         device = next(self.parameters()).device
-        flattened_tokens, offsets = prepare_tokens_for_embedding_bag(tokens, device)
+        flattened_tokens, offsets, mean_weighting = prepare_tokens_for_embedding_bag(tokens, device)
+        per_token_boosts = self.embedding_boosts(flattened_tokens).squeeze(dim=1)
 
-        x = self.average_pooling(flattened_tokens, offsets)
+        x = self.embedding_sum(
+            flattened_tokens,
+            offsets,
+            per_sample_weights=per_token_boosts * mean_weighting,
+        )
         x = self.hidden_layers(x)
         x = self.output_layer(x)
 
@@ -127,12 +145,9 @@ class PooledTwoTowerModel(DualEncoderModel):
     def __init__(self, training_parameters: TrainingHyperparameters, model_parameters: PooledTwoTowerModelHyperparameters):
         super(PooledTwoTowerModel, self).__init__()
 
-        match model_parameters.tokenizer:
-            case "week1-word2vec":
-                tokenizer = Word2VecTokenizer.load()
-                default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
-            case _:
-                raise ValueError(f"Unknown tokenizer: {model_parameters.tokenizer}")
+        tokenizer = get_tokenizer(model_parameters.tokenizer)
+        default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+        default_token_embedding_boosts = tokenizer.generate_default_embedding_boosts(training_parameters.initial_token_embeddings_boost_kind)
             
         self.tokenizer = tokenizer
 
@@ -142,6 +157,7 @@ class PooledTwoTowerModel(DualEncoderModel):
             output_size=model_parameters.comparison_embedding_size,
             include_layer_norms=model_parameters.include_layer_norms,
             default_token_embeddings=default_token_embeddings,
+            default_token_embedding_boosts=default_token_embedding_boosts,
         )
         self.document_tower=PooledTowerModel(
             training_parameters=training_parameters,
@@ -149,6 +165,7 @@ class PooledTwoTowerModel(DualEncoderModel):
             output_size=model_parameters.comparison_embedding_size,
             include_layer_norms=model_parameters.include_layer_norms,
             default_token_embeddings=default_token_embeddings,
+            default_token_embedding_boosts=default_token_embedding_boosts,
         )
         self._model_hyperparameters = model_parameters
 
@@ -166,6 +183,7 @@ class PooledTwoTowerModel(DualEncoderModel):
         ).to(device)
         model.load_state_dict(loaded_model_data["model"])
         model.eval()
+        model.validation_metrics = loaded_model_data["validation_metrics"]
 
         return model
 
@@ -200,12 +218,9 @@ class PooledOneTowerModel(DualEncoderModel):
     def __init__(self, training_parameters: TrainingHyperparameters, model_parameters: PooledOneTowerModelHyperparameters):
         super(PooledOneTowerModel, self).__init__()
 
-        match model_parameters.tokenizer:
-            case "week1-word2vec":
-                tokenizer = Word2VecTokenizer.load()
-                default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
-            case _:
-                raise ValueError(f"Unknown tokenizer: {model_parameters.tokenizer}")
+        tokenizer = get_tokenizer(model_parameters.tokenizer)
+        default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
+        default_token_embedding_boosts = tokenizer.generate_default_embedding_boosts(training_parameters.initial_token_embeddings_boost_kind)
             
         self.tokenizer = tokenizer
 
@@ -215,6 +230,7 @@ class PooledOneTowerModel(DualEncoderModel):
             output_size=model_parameters.comparison_embedding_size,
             include_layer_norms=model_parameters.include_layer_norms,
             default_token_embeddings=default_token_embeddings,
+            default_token_embedding_boosts=default_token_embedding_boosts,
         )
         self._model_hyperparameters = model_parameters
 
@@ -232,6 +248,7 @@ class PooledOneTowerModel(DualEncoderModel):
         ).to(device)
         model.load_state_dict(loaded_model_data["model"])
         model.eval()
+        model.validation_metrics = loaded_model_data["validation_metrics"]
 
         return model
 
@@ -253,13 +270,8 @@ class PooledOneTowerModel(DualEncoderModel):
 def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
     device = select_device()
     match model_name:
-        case "two-tower-boosted-word2vec-linear":
+        case "fixed-boosted-word2vec-linear":
             return PooledTwoTowerModel.load_for_evaluation(
-                model_name=model_name,
-                device=device,
-            )
-        case "one-tower-boosted-word2vec-linear":
-            return PooledOneTowerModel.load_for_evaluation(
                 model_name=model_name,
                 device=device,
             )
@@ -267,8 +279,13 @@ def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
             raise ValueError(f"Unknown model name: {model_name}")
         
 if __name__ == "__main__":
-    print("Loading model...")
-    model = load_model_for_evaluation("two-tower-boosted-word2vec-linear")
+    model_name = "fixed-boosted-word2vec-linear"
+
+    print(f"Loading model {model_name}...")
+    model = load_model_for_evaluation("fixed-boosted-word2vec-linear")
+
+    print(f"Previous validation metrics for {model_name}:")
+    print(model.validation_metrics)
 
     documents = [
         "My name is John Doe and I live in New York City.",

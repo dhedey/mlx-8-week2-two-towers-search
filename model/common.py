@@ -19,8 +19,10 @@ class TrainingHyperparameters:
     epochs: int
     learning_rate: float
     freeze_embeddings: bool
+    freeze_embedding_boosts: bool
     dropout: float
     initial_token_embeddings_kind: str
+    initial_token_embeddings_boost_kind: str
     margin: float
 
     @classmethod
@@ -30,9 +32,11 @@ class TrainingHyperparameters:
             epochs=0,
             learning_rate=0,
             freeze_embeddings=True,
+            freeze_embedding_boosts=True,
             dropout=0,
             margin=0,
-            initial_token_embeddings_kind="zeroes",
+            initial_token_embeddings_kind="zeros",
+            initial_token_embeddings_boost_kind="ones",
         )
 
     def to_dict(self):
@@ -67,7 +71,7 @@ class ModelLoader:
         model_location = self.model_location(model_name)
         loaded_data = torch.load(model_location, map_location=device)
 
-        print(f"Loaded model {model_name}...")
+        print(f"Loaded model {model_name}")
 
         return loaded_data
 

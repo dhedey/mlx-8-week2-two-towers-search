@@ -100,7 +100,7 @@ class ModelTrainer:
         print("Preparing model for training...")
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
 
-        print("Tokenizing queries and passages...")
+        print("Pre-tokenizing queries and documents...")
         train_dataset = dataset["train"].map(
             lambda x: {
                 "tokenized_query": model.tokenize_query(x["query"]),
