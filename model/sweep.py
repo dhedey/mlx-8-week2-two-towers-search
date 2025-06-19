@@ -140,7 +140,7 @@ def train_sweep_run():
             "final_validation_average_relevance": results['validation']["average_relevance"],
         })
         
-        print(f"✅ Sweep run completed! Reciprical Rank: {results['validation']["reciprical_rank"]:.4f}")
+        print(f"✅ Sweep run completed! Reciprical Rank: {results['validation']['reciprical_rank']:.4f}")
         
     except Exception as e:
         print(f"❌ Sweep run failed: {e}")
