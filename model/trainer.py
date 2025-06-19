@@ -12,6 +12,7 @@ import transformers
 import random
 import pandas as pd
 import math
+import wandb
 from models import DualEncoderModel, ModelLoader
 
 def prepare_test_batch(raw_batch, negative_samples):
@@ -147,16 +148,30 @@ class ModelTrainer:
         print("Beginning training...")
 
         self.epoch = 1
+        last_epoch_results = None
 
         while self.epoch <= self.model.training_parameters.epochs:
             print(f"Epoch {self.epoch}/{self.model.training_parameters.epochs}")
-            self.train_epoch()
-            if self.epoch % self.validate_and_save_after_epochs == 0:
+            last_epoch_results = self.train_epoch()
+            if self.epoch % self.validate_and_save_after_epochs == 0 or self.epoch == self.model.training_parameters.epochs:
                 self.model.validation_metrics = self.validate()
+
+                if wandb.run is not None:
+                    wandb.log({
+                        "epoch": self.epoch,
+                        "validation_any_relevant_result": self.model.validation_metrics["any_relevant_result"],
+                        "validation_reciprical_rank": self.model.validation_metrics["reciprical_rank"],
+                        "validation_average_relevance": self.model.validation_metrics["average_relevance"],
+                    })
             self.save_model()
             self.epoch += 1
 
         print("Training complete.")
+        return {
+            "total_epochs": self.model.training_parameters.epochs,
+            "validation": self.model.validation_metrics,
+            "last_epoch": last_epoch_results,
+        }
 
     def train_epoch(self):
         self.model.train()
@@ -165,12 +180,17 @@ class ModelTrainer:
         running_loss = 0.0
         running_samples = 0
         total_batches = len(self.train_data_loader)
+
+        epoch_loss = 0.0
+        epoch_samples = 0
         for batch_idx, raw_batch in enumerate(self.train_data_loader):
             self.optimizer.zero_grad()
             batch_results = process_test_batch(raw_batch, self.negative_samples, self.model, self.model.training_parameters.margin)
             loss = batch_results["total_loss"]
             running_samples += batch_results["document_count"]
             running_loss += loss.item()
+            epoch_loss += loss.item()
+            epoch_samples += batch_results["document_count"]
 
             loss.backward()
             self.optimizer.step()
@@ -180,7 +200,13 @@ class ModelTrainer:
                 print(f"Epoch {self.epoch}, Batch {batch_num}/{total_batches}, Average Loss: {(running_loss / running_samples):.4f}")
                 running_loss = 0.0
                 running_samples = 0
-        print(f"Epoch {self.epoch} complete")
+
+        average_loss = epoch_loss / epoch_samples if epoch_samples > 0 else 0.0
+        print(f"Epoch {self.epoch} complete (Average Loss: {average_loss:.4f})")
+
+        return {
+            "average_loss": average_loss,
+        }
 
     def validate(self):
         print()
