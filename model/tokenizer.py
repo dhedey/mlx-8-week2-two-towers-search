@@ -38,7 +38,12 @@ class Word2VecTokenizer(TokenizerBase):
     @classmethod
     def load(cls):
         folder = os.path.dirname(__file__)
-        word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt', weights_only=False)
+        try:
+            word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt', weights_only=False, map_location='cpu')
+        except Exception as e:
+            print(f"Error loading word vectors: {e}")
+            # Try alternative loading method
+            word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt', map_location='cpu')
 
         embeddings_shape = word_vectors["embeddings"].shape
         print(f"Word2Vec Tokenizer loaded. Vocabulary size {embeddings_shape[0]}, Embedding size: {embeddings_shape[1]}")
