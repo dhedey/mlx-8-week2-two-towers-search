@@ -12,8 +12,9 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters, select_device
+from common import TrainingHyperparameters, select_device, PersistableModel, PersistableData
 from tokenizer import get_tokenizer, TokenizerBase
+from typing import Optional, Self
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
@@ -179,7 +180,7 @@ class HiddenLayer(nn.Module):
         x = self.layer_norm(x)
         return x
 
-class DualEncoderModel(nn.Module):
+class DualEncoderModel(PersistableModel):
     validation_metrics = None
 
     """A base class for all our dual encoder models."""
@@ -188,8 +189,28 @@ class DualEncoderModel(nn.Module):
         self.model_name = model_name
         self.training_parameters = training_parameters
 
-    def get_device(self):
-        return next(self.parameters()).device
+    def build_creation_state(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "hyper_parameters": self.model_hyperparameters().to_dict(),
+            "training_parameters": self.training_parameters.to_dict(),
+            "validation_metrics": self.validation_metrics,
+        }
+    
+    @classmethod
+    def create(cls, creation_state: dict, for_evaluation_only: bool) -> Self:
+        """This method should return a new model from the creation state."""
+        model = cls(
+            model_name=creation_state["model_name"],
+            training_parameters=TrainingHyperparameters.from_dict(creation_state["training_parameters"]),
+            model_parameters=cls.hyper_parameters_class().from_dict(creation_state["hyper_parameters"]),
+        )
+        model.validation_metrics = creation_state.get("validation_metrics", None)
+        return model
+    
+    @classmethod
+    def hyper_parameters_class(cls) -> type[PersistableData]:
+        raise NotImplementedError("This method should be implemented by subclasses.")
 
     def tokenize_query(self, query: str) -> list[int]:
         raise NotImplementedError("This method should be implemented by subclasses.")
@@ -203,95 +224,16 @@ class DualEncoderModel(nn.Module):
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         raise NotImplementedError("This method should be implemented by subclasses.")
     
-    def model_hyperparameters(self):
+    def model_hyperparameters(self) -> PersistableData:
         raise NotImplementedError("This method should be implemented by subclasses.")
-    
-    @classmethod
-    def hyper_parameters_class(cls):
-        # e.g. return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
-        raise NotImplementedError("This class method should be implemented by subclasses.")
-
-    @classmethod
-    def load_for_evaluation(cls, model_name: str, device):
-        model_loader = ModelLoader()
-        loaded_model_data = model_loader.load_model_data(
-            model_name=model_name,
-            model_parameters_class=cls.hyper_parameters_class(),
-            device=device,
-        )
-        model = cls(
-            model_name=model_name,
-            training_parameters=TrainingHyperparameters.for_prediction(),
-            model_parameters=loaded_model_data["model_parameters"],
-        ).to(device)
-        model.load_state_dict(loaded_model_data["model"])
-        model.eval()
-        model.validation_metrics = loaded_model_data["validation_metrics"]
-
-        return model
-    
-    @classmethod
-    def load_to_continue_training(cls, model_name: str, device):
-        model_loader = ModelLoader()
-        loaded_model_data = model_loader.load_model_data(
-            model_name=model_name,
-            model_parameters_class=cls.hyper_parameters_class(),
-            device=device,
-        )
-        model = cls(
-            model_name=model_name,
-            training_parameters=TrainingHyperparameters.from_dict(loaded_model_data["training_parameters"]),
-            model_parameters=loaded_model_data["model_parameters"],
-        ).to(device)
-        model.load_state_dict(loaded_model_data["model"])
-        model.train()
-        model.validation_metrics = loaded_model_data["validation_metrics"]
-
-        return {
-            "model": model,
-            "optimizer_state": loaded_model_data["optimizer_state"],
-            "epoch": loaded_model_data["epoch"],
-        }
-
-class ModelLoader:
-    def __init__(self):
-        self.folder = os.path.dirname(__file__)
-
-    def save_model_data(self, model: DualEncoderModel, optimizer, epoch):
-        location = self.model_location(model.model_name)
-        torch.save({
-            "model": model.state_dict(),
-            "training_parameters": model.training_parameters.to_dict(),
-            "model_parameters": model.model_hyperparameters(),
-            "validation_metrics": model.validation_metrics,
-            "optimizer_state": optimizer.state_dict(),
-            "epoch": epoch,
-        }, location)
-        print(f"Model saved to {location}")
-
-    def load_model_data(self, model_name, model_parameters_class, device):
-        torch.serialization.add_safe_globals([model_parameters_class])
-
-        model_location = self.model_location(model_name)
-        loaded_data = torch.load(model_location, map_location=device)
-
-        print(f"Loaded model {model_name}")
-
-        return loaded_data
-
-    def model_location(self, model_name):
-        return os.path.join(self.folder, "data", f"{model_name}.pt")
 
 @dataclass
-class PooledTwoTowerModelHyperparameters:
+class PooledTwoTowerModelHyperparameters(PersistableData):
     tokenizer: str
     comparison_embedding_size: int
     query_tower_hidden_dimensions: list[int]
     doc_tower_hidden_dimensions: list[int]
     include_layer_norms: bool
-
-    def to_dict(self):
-        return vars(self)
 
 class PooledTwoTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
@@ -324,8 +266,8 @@ class PooledTwoTowerModel(DualEncoderModel):
         self._model_hyperparameters = model_parameters
     
     @classmethod
-    def hyper_parameters_class(cls):
-        return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
+    def hyper_parameters_class(cls) -> type[PersistableData]:
+        return PooledTwoTowerModelHyperparameters
 
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
@@ -338,20 +280,14 @@ class PooledTwoTowerModel(DualEncoderModel):
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         return self.document_tower(tokenized_documents)
-    
-    def model_hyperparameters(self):
-        return self._model_hyperparameters
 
 @dataclass
-class RNNTowerModelHyperparameters:
+class RNNTowerModelHyperparameters(PersistableData):
     tokenizer: str
     comparison_embedding_size: int
     query_tower_hidden_dimensions: list[int]
     doc_tower_hidden_dimensions: list[int]
     include_layer_norms: bool
-
-    def to_dict(self):
-        return vars(self)
 
 class RNNTwoTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
@@ -383,7 +319,7 @@ class RNNTwoTowerModel(DualEncoderModel):
     
     @classmethod
     def hyper_parameters_class(cls):
-        return (RNNTowerModelHyperparameters, "models.RNNTowerModelHyperparameters")
+        return RNNTowerModelHyperparameters
 
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
@@ -400,19 +336,13 @@ class RNNTwoTowerModel(DualEncoderModel):
         device = next(self.parameters()).device
         sequences = prepare_tokens_for_rnn(tokenized_documents, device)
         return self.document_tower(sequences)
-    
-    def model_hyperparameters(self):
-        return self._model_hyperparameters
 
 @dataclass
-class PooledOneTowerModelHyperparameters:
+class PooledOneTowerModelHyperparameters(PersistableData):
     tokenizer: str
     comparison_embedding_size: int
     hidden_dimensions: list[int]
     include_layer_norms: bool
-
-    def to_dict(self):
-        return vars(self)
 
 class PooledOneTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
@@ -437,8 +367,8 @@ class PooledOneTowerModel(DualEncoderModel):
         self._model_hyperparameters = model_parameters
 
     @classmethod
-    def hyper_parameters_class(cls):
-        return (PooledOneTowerModelHyperparameters, "models.PooledOneTowerModelHyperparameters")
+    def hyper_parameters_class(cls) -> type[PersistableData]:
+        return PooledOneTowerModelHyperparameters
 
     def tokenize_query(self, query: str) -> list[int]:
         return self.tokenizer.tokenize(query)
@@ -451,36 +381,6 @@ class PooledOneTowerModel(DualEncoderModel):
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         return self.tower(tokenized_documents)
-    
-    def model_hyperparameters(self):
-        return self._model_hyperparameters
-
-
-def load_model_for_evaluation(model_name: str) -> DualEncoderModel:
-    device = select_device()
-    match model_name:
-        case "fixed-boosted-word2vec-pooled":
-            return PooledTwoTowerModel.load_for_evaluation(
-                model_name=model_name,
-                device=device,
-            )
-        case "learned-boosted-mini-lm-pooled":
-            return PooledTwoTowerModel.load_for_evaluation(
-                model_name=model_name,
-                device=device,
-            )
-        case "fixed-boosted-word2vec-rnn":
-            return RNNTwoTowerModel.load_for_evaluation(
-                model_name=model_name,
-                device=device,
-            )
-        case "learned-boosted-mini-lm-rnn":
-            return RNNTwoTowerModel.load_for_evaluation(
-                model_name=model_name,
-                device=device,
-            )
-        case _:
-            raise ValueError(f"Unknown model name: {model_name}")
         
 if __name__ == "__main__":
     query = "What is the weather like in New York City?"
@@ -496,6 +396,7 @@ if __name__ == "__main__":
     model_names = [
         "fixed-boosted-word2vec-pooled",
         "learned-boosted-mini-lm-pooled",
+        ""
     ]
 
     print(f"Showing different model results for query: {query}")
@@ -505,7 +406,7 @@ if __name__ == "__main__":
 
         print("==========================")
         print(f"Loading model {model_name}...")
-        model = load_model_for_evaluation(model_name)
+        model = DualEncoderModel.load_for_evaluation(model_name)
 
         print(f"Previous validation metrics for {model_name}:")
         print(model.validation_metrics)
