@@ -212,7 +212,7 @@ if __name__ == "__main__":
 
     trainer = ModelTrainer(
         model=model.to(device),
-        validate_and_save_after_epochs=1
+        validate_after_epochs=1
     )
     trainer.train()
 

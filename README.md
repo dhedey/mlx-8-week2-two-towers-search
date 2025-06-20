@@ -25,25 +25,16 @@ Pooled models use `EmbeddingBag` to aggregate token embeddings, making them fast
 ```bash
 uv run ./model/start_train.py --model fixed-boosted-word2vec-pooled
 ```
-- Uses Word2Vec embeddings with frequency-based boosting
-- Embeddings are frozen during training
-- No hidden layers (direct pooling to output)
 
 ### Learned Boosted Word2Vec (Pooled)
 ```bash
 uv run ./model/start_train.py --model learned-boosted-word2vec-pooled
 ```
-- Uses Word2Vec embeddings with learnable boosting factors
-- Embeddings are frozen, but boosts are learned
-- No hidden layers (direct pooling to output)
 
 ### Learned Boosted MiniLM (Pooled)
 ```bash
 uv run ./model/start_train.py --model learned-boosted-mini-lm-pooled
 ```
-- Uses MiniLM embeddings with learnable boosting factors
-- Embeddings are frozen, but boosts are learned
-- No hidden layers (direct pooling to output)
 
 ## RNN Models (Sequential Processing)
 
@@ -53,25 +44,16 @@ RNN models use recurrent neural networks to process token sequences, capturing s
 ```bash
 uv run ./model/start_train.py --model fixed-boosted-word2vec-rnn
 ```
-- Uses Word2Vec embeddings with frequency-based boosting
-- RNN processing with hidden layers [128, 64]
-- Embeddings are frozen during training
 
 ### Learned Boosted Word2Vec (RNN)
 ```bash
 uv run ./model/start_train.py --model learned-boosted-word2vec-rnn
 ```
-- Uses Word2Vec embeddings with learnable boosting factors
-- RNN processing with hidden layers [128, 64]
-- Embeddings are frozen, but boosts are learned
 
 ### Learned Boosted MiniLM (RNN)
 ```bash
 uv run ./model/start_train.py --model learned-boosted-mini-lm-rnn
 ```
-- Uses MiniLM embeddings with learnable boosting factors
-- RNN processing with hidden layers [128, 64]
-- Embeddings are frozen, but boosts are learned
 
 ## Model Architecture Comparison
 
