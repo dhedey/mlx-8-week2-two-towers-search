@@ -38,7 +38,7 @@ class Word2VecTokenizer(TokenizerBase):
     @classmethod
     def load(cls):
         folder = os.path.dirname(__file__)
-        word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt')
+        word_vectors = torch.load(folder + '/data/week-1-word2vec-word-vectors.pt', weights_only=False)
 
         embeddings_shape = word_vectors["embeddings"].shape
         print(f"Word2Vec Tokenizer loaded. Vocabulary size {embeddings_shape[0]}, Embedding size: {embeddings_shape[1]}")

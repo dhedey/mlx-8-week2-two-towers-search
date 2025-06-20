@@ -81,9 +81,9 @@ class PooledTowerModel(nn.Module):
 
         input_sizes = [default_token_embeddings.shape[1]] + dimension_sizes
         output_sizes = dimension_sizes + [output_size]
-        hidden_layer_sizes = zip(input_sizes[:-1], output_sizes[:-1])
+        layer_pairs = zip(input_sizes[:-1], output_sizes[:-1])
         self.hidden_layers = nn.Sequential(*[
-            HiddenLayer(input_size, output_size, include_layer_norms, training_parameters.dropout) for input_size, output_size in hidden_layer_sizes
+            HiddenLayer(input_size, output_size, include_layer_norms, training_parameters.dropout) for input_size, output_size in layer_pairs
         ])
 
         self.output_layer = nn.Linear(input_sizes[-1], output_sizes[-1])
@@ -134,10 +134,10 @@ class RNNTowerModel(nn.Module):
         dimension_sizes = hidden_layer_sizes
         input_sizes = [rnn_hidden_size] + dimension_sizes  # Start from RNN hidden size
         output_sizes = dimension_sizes + [output_size]
-        hidden_layer_sizes = zip(input_sizes[:-1], output_sizes[:-1])
+        layer_pairs = zip(input_sizes[:-1], output_sizes[:-1])
         self.hidden_layers = nn.Sequential(*[
             HiddenLayer(input_size, output_size, include_layer_norms, training_parameters.dropout) 
-            for input_size, output_size in hidden_layer_sizes
+            for input_size, output_size in layer_pairs
         ])
 
         # Output layer takes the last hidden layer output
@@ -222,7 +222,7 @@ class DualEncoderModel(nn.Module):
         model = cls(
             model_name=model_name,
             training_parameters=TrainingHyperparameters.for_prediction(),
-            model_parameters=loaded_model_data["model_parameters"],
+            **{"model_parameters": loaded_model_data["model_parameters"]}
         ).to(device)
         model.load_state_dict(loaded_model_data["model"])
         model.eval()
@@ -241,7 +241,7 @@ class DualEncoderModel(nn.Module):
         model = cls(
             model_name=model_name,
             training_parameters=TrainingHyperparameters.from_dict(loaded_model_data["training_parameters"]),
-            model_parameters=loaded_model_data["model_parameters"],
+            **{"model_parameters": loaded_model_data["model_parameters"]}
         ).to(device)
         model.load_state_dict(loaded_model_data["model"])
         model.train()
