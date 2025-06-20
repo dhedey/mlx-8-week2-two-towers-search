@@ -12,9 +12,8 @@ import transformers
 import random
 import pandas as pd
 import math
-import wandb
-from models import DualEncoderModel, ModelLoader
-from typing import Optional
+from model.common import TrainingHyperparameters, ModelLoader
+from model.models import DualEncoderModel
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -26,7 +25,7 @@ def prepare_test_batch(raw_batch, negative_samples):
         queries.append(query_row["tokenized_query"])
         good_passages = query_row["tokenized_passages"]
         good_documents.extend(good_passages)
-        
+
         good_passage_count = len(good_passages)
         document_count_for_each_query.append(good_passage_count)
 
@@ -35,7 +34,7 @@ def prepare_test_batch(raw_batch, negative_samples):
     bad_documents = [
         negative_samples[i]["tokenized_passage"] for i in negative_sample_choices
     ]
-    
+
     return {
         "tokenized_queries": queries,
         "tokenized_good_documents": good_documents,
@@ -45,7 +44,7 @@ def prepare_test_batch(raw_batch, negative_samples):
 
 def calculate_triplet_loss(query_vectors, good_document_vectors, bad_document_vectors, margin: float = 0.2):
     """
-    Calculate the loss for a single query-document pair. 
+    Calculate the loss for a single query-document pair.
     """
     good_similarity = F.cosine_similarity(query_vectors, good_document_vectors, dim=1)
     bad_similarity = F.cosine_similarity(query_vectors, bad_document_vectors, dim=1)
@@ -223,7 +222,7 @@ class ModelTrainer:
         document_index_to_document_text = []
         document_index_to_tokenized_doc = []
         total_documents = 0
-    
+
         query_passage_to_query_index = {} # passage => query_index
         query_index_to_query_ids = []
         query_index_to_query_text = []
@@ -244,7 +243,7 @@ class ModelTrainer:
                     document_index_to_document_ids.append([])
                     document_index_to_document_text.append(document_text)
                     document_index_to_tokenized_doc.append(tokenized_document)
-    
+
                 document_index_to_document_ids[document_index].append((query_id, i))
 
             query_text = query_row['query']
@@ -277,7 +276,7 @@ class ModelTrainer:
                 batch = data[i:i + batch_size]
                 embeddings.append(method(batch))
             return torch.cat(embeddings)
-        
+
         query_embeddings = batch_evaluation(query_index_to_tokenized_query, self.model.embed_tokenized_queries)
         document_embeddings = batch_evaluation(document_index_to_tokenized_doc, self.model.embed_tokenized_documents)
 
@@ -324,7 +323,7 @@ class ModelTrainer:
         any_relevant_result = statistics.mean(any_relevant_result_by_query)
         reciprical_rank = statistics.mean(reciprical_ranks_of_first_relevant_result_by_query)
         average_relevance = statistics.mean(average_relevance_by_query)
-        
+
         print(f"Across the first {total_queries_to_consider} queries, we queried the top {k_samples} documents (from {distinct_document_count} docs across {distinct_query_count} queries):")
         print(f"> Proportion with any relevant result     : {any_relevant_result:.2%}")
         print(f"> Reciprical rank of first relevant result: {reciprical_rank:.2%}")
@@ -338,8 +337,8 @@ class ModelTrainer:
             "reciprical_rank": reciprical_rank,
             "average_relevance": average_relevance,
         }
-    
-    def save_model(self):
+
+    def save_model(self, validation_metrics):
         model_loader = ModelLoader()
         model_loader.save_model_data(
             model=self.model,
