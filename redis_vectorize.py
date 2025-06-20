@@ -80,7 +80,7 @@ if __name__ == "__main__":
     # Load MS MARCO sample
     msmarco_dataset = datasets.load_dataset("microsoft/ms_marco", "v1.1", split="train")
     msmarco_documents = []
-    num_docs = 1000  # Set this to the desired number of documents
+    num_docs = min(100000, len(msmarco_dataset))  # Ensure we do not exceed dataset size
     for i in range(num_docs):
         query_row = msmarco_dataset[i]
         passages = query_row["passages"]["passage_text"]
