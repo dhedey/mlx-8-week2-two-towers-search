@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Run as uv run -m model.sweep
 """
 Weights & Biases Hyperparameter Sweep Script
 
@@ -9,9 +10,9 @@ It provides more control over the sweep process compared to the CLI-based approa
 import wandb
 import os
 
-from models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
-from trainer import ModelTrainer
-from common import select_device
+from .models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
+from .trainer import ModelTrainer
+from .common import select_device
 
 PROJECT_NAME = "week2-two-towers"
 

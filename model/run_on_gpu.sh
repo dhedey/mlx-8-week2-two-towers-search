@@ -1,4 +1,5 @@
 # ssh -p [PORT] -i ~/.ssh/mli_computa root@[IP]
+# Then copy/paste this script into the remote machine
 
 apt-get update
 apt-get install git
@@ -16,6 +17,9 @@ cd mlx-8-week2-two-towers-search
 # Change if you're someone else!
 git config --global user.email "mli@david-edey.com"
 git config --global user.name "David Edey"
+# You can generate a new token at https://github.com/settings/personal-access-tokens
+# => Select only this repository
+# => Select Read and Write access to Contents (AKA Code)
 
 # Launches a new tmux session (with name sweep) the name is optional!
 # This session can survive even if you disconnect from SSH
@@ -29,5 +33,5 @@ tmux new -s sweep
 # Check GPU usage with the nvtop command
 
 # Now run a script, e.g.
-# uv run ./model/start_train.py
-# uv run ./model/models.py
+# uv run -m model.continue_train
+# uv run -m model.models

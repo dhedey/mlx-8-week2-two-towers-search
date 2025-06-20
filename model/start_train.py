@@ -1,21 +1,9 @@
-from dataclasses import dataclass, field
-import datasets
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-import torch.nn as nn
-import torch.optim as optim
-import torch
-import re
-import os
-import statistics
-import transformers
-import random
-import pandas as pd
+# Run as uv run -m model.start_train
+
 import argparse
-import math
-from common import select_device
-from models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
-from trainer import ModelTrainer
+from .common import select_device
+from .models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
+from .trainer import ModelTrainer
 
 if __name__ == "__main__":
     device = select_device()
@@ -29,6 +17,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model_name = args.model
+
+    print(f"Starting training model: {model_name}")
 
     match model_name:
         case "fixed-boosted-word2vec-pooled":

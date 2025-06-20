@@ -23,7 +23,7 @@ Pooled models use `EmbeddingBag` to aggregate token embeddings, making them fast
 
 ### Fixed Boosted Word2Vec (Pooled)
 ```bash
-uv run ./model/start_train.py --model fixed-boosted-word2vec-pooled
+uv run -m model.start_train --model fixed-boosted-word2vec-pooled
 ```
 
 ### Learned Boosted Word2Vec (Pooled)

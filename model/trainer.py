@@ -5,18 +5,13 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
 import torch
-import re
-import os
 import statistics
-import transformers
 import random
-import pandas as pd
-import math
 import wandb
-from common import TrainingState
-from models import DualEncoderModel
 from typing import Optional
 import time
+from .common import TrainingState
+from .models import DualEncoderModel
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -99,7 +94,7 @@ class ModelTrainer:
         self.model = model
         self.validate_and_save_after_epochs = validate_after_epochs
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=model.training_parameters.learning_rate)
 
         if continuation is not None:
             self.epoch = continuation.epoch
@@ -357,13 +352,32 @@ class ModelTrainer:
         }
     
     def save_model(self):
+        training_state = TrainingState(
+            epoch=self.epoch,
+            optimizer_state=self.optimizer.state_dict(),
+            total_training_time_seconds=self.total_training_time_seconds,
+            latest_training_loss=self.latest_training_loss,
+            latest_validation_loss=self.latest_validation_loss,
+        )
         self.model.save_model_data(
             model_name=self.model.model_name,
-            training_state=TrainingState(
-                epoch=self.epoch,
-                optimizer_state=self.optimizer.state_dict(),
-                total_training_time_seconds=self.total_training_time_seconds,
-                latest_training_loss=self.latest_training_loss,
-                latest_validation_loss=self.latest_validation_loss,
-            )
+            training_state=training_state
         )
+        best_model_name = self.model.model_name + '-best'
+        try:
+            _, best_training_state = DualEncoderModel.load_for_training(model_name=best_model_name)
+            best_validation_loss = best_training_state.latest_validation_loss
+            best_validation_epoch = best_training_state.epoch
+        except Exception:
+            best_validation_loss = None
+            best_validation_epoch = None
+
+        def format_optional_float(value):
+            return f"{value:.2f}" if value is not None else "N/A"
+
+        is_improvement = self.latest_validation_loss is not None and (best_validation_loss is None or self.latest_validation_loss < best_validation_loss)
+        if is_improvement:
+            print(f"The current validation loss {format_optional_float(self.latest_validation_loss)} is better than the previous best validation loss {format_optional_float(best_validation_loss)} from epoch {best_validation_epoch}, saving as {best_model_name}...")
+            self.model.save_model_data(model_name=best_model_name, training_state=training_state)
+        else:
+            print(f"The current validation loss {format_optional_float(self.latest_validation_loss)} is not better than the previous best validation loss {format_optional_float(best_validation_loss)} from epoch {best_validation_epoch}, so not saving as best.")

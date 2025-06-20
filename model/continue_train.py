@@ -1,20 +1,7 @@
-from dataclasses import dataclass, field
-import datasets
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-import torch.nn as nn
-import torch.optim as optim
-import torch
-import re
-import os
-import statistics
-import transformers
-import random
-import pandas as pd
+# Run as uv run -m model.continue_train
 import argparse
-import math
-from models import DualEncoderModel
-from trainer import ModelTrainer
+from .models import DualEncoderModel
+from .trainer import ModelTrainer
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Continue training a dual encoder model for text search')
@@ -35,7 +22,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model, training_state = DualEncoderModel.load_for_training(args.model)
+    model, training_state = DualEncoderModel.load_for_training(
+        model_name=args.model
+    )
 
     trainer = ModelTrainer(
         model=model,

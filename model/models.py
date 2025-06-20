@@ -1,9 +1,6 @@
 from dataclasses import dataclass, field
-import datasets
-from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.optim as optim
 import torch
 import re
 import os
@@ -12,9 +9,9 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import PersistableModel, PersistableData
-from tokenizer import get_tokenizer, TokenizerBase
 from typing import Optional, Self
+from .common import PersistableModel, PersistableData
+from .tokenizer import get_tokenizer, TokenizerBase
 
 @dataclass
 class TrainingHyperparameters(PersistableData):
