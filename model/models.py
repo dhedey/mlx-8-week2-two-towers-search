@@ -414,6 +414,7 @@ if __name__ == "__main__":
         "learned-boosted-mini-lm-pooled",
         "fixed-boosted-word2vec-rnn",
         "learned-boosted-word2vec-rnn",
+        "learned-boosted-mini-lm-rnn",
     ]
 
     print(f"Showing different model results for query: {query}")

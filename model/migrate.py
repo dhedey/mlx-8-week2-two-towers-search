@@ -23,6 +23,10 @@ models = [
         "name": "learned-boosted-word2vec-rnn",
         "class_name": "RNNTwoTowerModel",
     },
+    {
+        "name": "learned-boosted-mini-lm-rnn",
+        "class_name": "RNNTwoTowerModel",
+    }
 ]
 
 # OLD STATE
