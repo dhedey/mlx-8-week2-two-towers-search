@@ -14,7 +14,7 @@ import pandas as pd
 import argparse
 import math
 from common import TrainingHyperparameters, select_device
-from models import PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel
+from models import DualEncoderModel
 from trainer import ModelTrainer
 
 if __name__ == "__main__":
@@ -41,26 +41,12 @@ if __name__ == "__main__":
     model_name = args.model
     override_to_epoch = args.end_epoch
 
-    match model_name:
-        case "fixed-boosted-word2vec-pooled":
-            continuation = PooledTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "learned-boosted-word2vec-pooled":
-            continuation = PooledTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "learned-boosted-mini-lm-pooled":
-            continuation = PooledTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "fixed-boosted-word2vec-rnn":
-            continuation = RNNTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "learned-boosted-word2vec-rnn":
-            continuation = RNNTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case "learned-boosted-mini-lm-rnn":
-            continuation = RNNTwoTowerModel.load_to_continue_training(model_name=model_name, device=device)
-        case _:
-            raise ValueError(f"Unknown model name: {model_name}")
+    model, training_state = DualEncoderModel.load_for_training(model_name)
 
     trainer = ModelTrainer(
-        model=continuation["model"].to(device),
-        start_epoch=continuation["epoch"] + 1,
-        start_optimizer_state=continuation["optimizer_state"],
+        model=model,
+        start_epoch=training_state.epoch + 1,
+        start_optimizer_state=training_state.optimizer_state,
         override_to_epoch=override_to_epoch,
         immediate_validation=args.immediate_validation,
     )

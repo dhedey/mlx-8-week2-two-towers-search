@@ -18,15 +18,15 @@ from models import PooledOneTowerModelHyperparameters, PooledTwoTowerModelHyperp
 
 models = [
     {
-        "name": "fixed-boosted-word2vec-linear",
+        "name": "fixed-boosted-word2vec-pooled",
         "class_name": "PooledTwoTowerModel",
     },
     {
-        "name": "learned-boosted-gemma3-1b-linear",
+        "name": "learned-boosted-gemma-3-1b-pooled",
         "class_name": "PooledTwoTowerModel",
     },
     {
-        "name": "learned-boosted-mini-lm-linear",
+        "name": "learned-boosted-mini-lm-pooled",
         "class_name": "PooledTwoTowerModel",
     },
     {
@@ -34,7 +34,7 @@ models = [
         "class_name": "RNNTwoTowerModel",
     },
     {
-        "name": "learned-boosted-mini-lm-rnn",
+        "name": "learned-boosted-word2vec-rnn",
         "class_name": "RNNTwoTowerModel",
     },
 ]

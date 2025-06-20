@@ -16,10 +16,12 @@ from typing import Optional, Self
 
 class PersistableData:
     def to_dict(self):
-        dict = vars(self)
-        for key, value in dict.items():
+        output = vars(self)
+        for key, value in output.items():
             if isinstance(value, PersistableData):
-                dict[key] = value.to_dict()
+                output[key] = value.to_dict()
+
+        return output
     
     @classmethod
     def from_dict(cls, d):
@@ -136,12 +138,12 @@ class PersistableModel(nn.Module):
 
     @classmethod
     def load_for_evaluation(cls, model_name: str, device: Optional[str] = None) -> Self:
-        model = cls.load(model_name=model_name, device=device, for_evaluation_only=True)
+        model, _ = cls.load(model_name=model_name, device=device, for_evaluation_only=True)
         model.eval()
         return model
     
     @classmethod
-    def load_for_training(cls, model_name: str, device: Optional[str] = None) -> Self:
-        model = cls.load(model_name=model_name, device=device, for_evaluation_only=False)
+    def load_for_training(cls, model_name: str, device: Optional[str] = None) -> tuple[Self, TrainingState]:
+        model, training_state = cls.load(model_name=model_name, device=device, for_evaluation_only=False)
         model.train()
-        return model
+        return (model, training_state)

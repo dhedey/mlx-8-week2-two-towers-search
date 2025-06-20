@@ -200,6 +200,7 @@ class DualEncoderModel(PersistableModel):
     @classmethod
     def create(cls, creation_state: dict, for_evaluation_only: bool) -> Self:
         """This method should return a new model from the creation state."""
+        print(creation_state)
         model = cls(
             model_name=creation_state["model_name"],
             training_parameters=TrainingHyperparameters.from_dict(creation_state["training_parameters"]),
@@ -396,7 +397,8 @@ if __name__ == "__main__":
     model_names = [
         "fixed-boosted-word2vec-pooled",
         "learned-boosted-mini-lm-pooled",
-        ""
+        "fixed-boosted-word2vec-rnn",
+        "learned-boosted-word2vec-rnn",
     ]
 
     print(f"Showing different model results for query: {query}")
