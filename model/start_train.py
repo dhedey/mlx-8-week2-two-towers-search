@@ -13,8 +13,8 @@ import random
 import pandas as pd
 import argparse
 import math
-from common import TrainingHyperparameters, select_device
-from models import PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
+from common import select_device
+from models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
 from trainer import ModelTrainer
 
 if __name__ == "__main__":

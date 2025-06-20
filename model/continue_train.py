@@ -13,13 +13,10 @@ import random
 import pandas as pd
 import argparse
 import math
-from common import TrainingHyperparameters, select_device
 from models import DualEncoderModel
 from trainer import ModelTrainer
 
 if __name__ == "__main__":
-    device = select_device()
-
     parser = argparse.ArgumentParser(description='Continue training a dual encoder model for text search')
     parser.add_argument(
         '--model',
@@ -38,16 +35,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_name = args.model
-    override_to_epoch = args.end_epoch
-
-    model, training_state = DualEncoderModel.load_for_training(model_name)
+    model, training_state = DualEncoderModel.load_for_training(args.model)
 
     trainer = ModelTrainer(
         model=model,
-        start_epoch=training_state.epoch + 1,
-        start_optimizer_state=training_state.optimizer_state,
-        override_to_epoch=override_to_epoch,
+        continuation=training_state,
+        override_to_epoch=args.end_epoch,
         immediate_validation=args.immediate_validation,
     )
     trainer.train()

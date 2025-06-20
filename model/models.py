@@ -12,9 +12,21 @@ import transformers
 import random
 import pandas as pd
 import math
-from common import TrainingHyperparameters, select_device, PersistableModel, PersistableData
+from common import PersistableModel, PersistableData
 from tokenizer import get_tokenizer, TokenizerBase
 from typing import Optional, Self
+
+@dataclass
+class TrainingHyperparameters(PersistableData):
+    batch_size: int
+    epochs: int
+    learning_rate: float
+    freeze_embeddings: bool
+    freeze_embedding_boosts: bool
+    dropout: float
+    initial_token_embeddings_kind: str
+    initial_token_embeddings_boost_kind: str
+    margin: float
 
 def prepare_tokens_for_embedding_bag(tokens_list: list[list[int]], device):
     """
@@ -181,7 +193,7 @@ class HiddenLayer(nn.Module):
         return x
 
 class DualEncoderModel(PersistableModel):
-    validation_metrics = None
+    validation_metrics: Optional[dict] = None
 
     """A base class for all our dual encoder models."""
     def __init__(self, model_name: str, training_parameters: TrainingHyperparameters):

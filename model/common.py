@@ -28,32 +28,6 @@ class PersistableData:
         """You might need to override this method in subclasses if they have nested Persistable objects."""
         return cls(**d)
 
-@dataclass
-class TrainingHyperparameters(PersistableData):
-    batch_size: int
-    epochs: int
-    learning_rate: float
-    freeze_embeddings: bool
-    freeze_embedding_boosts: bool
-    dropout: float
-    initial_token_embeddings_kind: str
-    initial_token_embeddings_boost_kind: str
-    margin: float
-
-    @classmethod
-    def for_prediction(cls):
-        return cls(
-            batch_size=1,
-            epochs=0,
-            learning_rate=0,
-            freeze_embeddings=True,
-            freeze_embedding_boosts=True,
-            dropout=0,
-            margin=0,
-            initial_token_embeddings_kind="zeros",
-            initial_token_embeddings_boost_kind="ones",
-        )
-
 def select_device():
     DEVICE_IF_MPS_SUPPORT = 'cpu' # or 'mps' - but it doesn't work well with EmbeddingBag
     device = torch.device('cuda' if torch.cuda.is_available() else DEVICE_IF_MPS_SUPPORT if torch.backends.mps.is_available() else 'cpu')
@@ -65,8 +39,9 @@ def select_device():
 class TrainingState(PersistableData):
     epoch: int
     optimizer_state: dict
-    latest_training_loss: Optional[float]
-    latest_validation_loss: Optional[float]
+    total_training_time_seconds: Optional[float] = None
+    latest_training_loss: Optional[float] = None
+    latest_validation_loss: Optional[float] = None
 
 class PersistableModel(nn.Module):
     registered_types: dict[str, type] = {}

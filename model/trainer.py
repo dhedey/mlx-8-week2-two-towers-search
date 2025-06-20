@@ -13,8 +13,10 @@ import random
 import pandas as pd
 import math
 import wandb
-from models import DualEncoderModel, ModelLoader
+from common import TrainingState
+from models import DualEncoderModel
 from typing import Optional
+import time
 
 def prepare_test_batch(raw_batch, negative_samples):
     queries = []
@@ -84,8 +86,7 @@ class ModelTrainer:
     def __init__(
             self,
             model: DualEncoderModel,
-            start_epoch = None,
-            start_optimizer_state = None,
+            continuation: Optional[TrainingState] = None,
             override_to_epoch: Optional[int] = None,
             validate_after_epochs: int = 5,
             immediate_validation: bool = False,
@@ -100,11 +101,18 @@ class ModelTrainer:
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.002)
 
-        if start_epoch is not None:
-            assert start_optimizer_state is not None, "If start epoch is provided, optimizer state must also be provided"
-            self.epoch = start_epoch
-            self.optimizer.load_state_dict(start_optimizer_state)
+        if continuation is not None:
+            self.epoch = continuation.epoch
+            self.optimizer.load_state_dict(continuation.optimizer_state)
+            self.total_training_time_seconds = continuation.total_training_time_seconds
+            self.latest_training_loss = continuation.latest_training_loss
+            self.latest_validation_loss = continuation.latest_validation_loss
             print(f"Resuming training from epoch {self.epoch}")
+        else:
+            self.epoch = 0
+            self.total_training_time_seconds = 0.0
+            self.latest_training_loss = None
+            self.latest_validation_loss = None
 
         if override_to_epoch is not None:
             self.model.training_parameters.epochs = override_to_epoch
@@ -153,11 +161,11 @@ class ModelTrainer:
     def train(self):
         print("Beginning training...")
 
-        self.epoch = 1
         last_epoch_results = None
 
-        while self.epoch <= self.model.training_parameters.epochs:
-            print(f"Epoch {self.epoch}/{self.model.training_parameters.epochs}")
+        while self.epoch < self.model.training_parameters.epochs:
+            self.epoch += 1
+            print(f"Starting epoch {self.epoch}/{self.model.training_parameters.epochs}")
             last_epoch_results = self.train_epoch()
             if self.epoch % self.validate_and_save_after_epochs == 0 or self.epoch == self.model.training_parameters.epochs:
                 self.model.validation_metrics = self.validate()
@@ -170,7 +178,6 @@ class ModelTrainer:
                         "validation_average_relevance": self.model.validation_metrics["average_relevance"],
                     })
             self.save_model()
-            self.epoch += 1
 
         print("Training complete.")
         return {
@@ -186,6 +193,8 @@ class ModelTrainer:
         running_loss = 0.0
         running_samples = 0
         total_batches = len(self.train_data_loader)
+        
+        start_epoch_time_at = time.time()
 
         epoch_loss = 0.0
         epoch_samples = 0
@@ -208,7 +217,13 @@ class ModelTrainer:
                 running_samples = 0
 
         average_loss = epoch_loss / epoch_samples if epoch_samples > 0 else 0.0
-        print(f"Epoch {self.epoch} complete (Average Loss: {average_loss:.4f})")
+        training_time = time.time() - start_epoch_time_at
+        print(f"Epoch {self.epoch} complete (Average Loss: {average_loss:.4f}, Time: {training_time:.1f}s)")
+
+        if self.total_training_time_seconds is not None:
+            self.total_training_time_seconds += training_time
+
+        self.latest_training_loss = average_loss
 
         return {
             "average_loss": average_loss,
@@ -333,6 +348,8 @@ class ModelTrainer:
         print(f"Validation complete")
         print()
 
+        self.latest_validation_loss = 3 - any_relevant_result - reciprical_rank - average_relevance
+
         return {
             "any_relevant_result": any_relevant_result,
             "reciprical_rank": reciprical_rank,
@@ -340,9 +357,13 @@ class ModelTrainer:
         }
     
     def save_model(self):
-        model_loader = ModelLoader()
-        model_loader.save_model_data(
-            model=self.model,
-            optimizer=self.optimizer,
-            epoch=self.epoch,
+        self.model.save_model_data(
+            model_name=self.model.model_name,
+            training_state=TrainingState(
+                epoch=self.epoch,
+                optimizer_state=self.optimizer.state_dict(),
+                total_training_time_seconds=self.total_training_time_seconds,
+                latest_training_loss=self.latest_training_loss,
+                latest_validation_loss=self.latest_validation_loss,
+            )
         )
