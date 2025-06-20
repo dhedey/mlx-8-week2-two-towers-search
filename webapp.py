@@ -19,8 +19,8 @@ DEFAULT_TOP_K = 5
 
 # Available models
 AVAILABLE_MODELS = [
-    "two-tower-boosted-word2vec-linear",
-    "one-tower-boosted-word2vec-linear"
+    "fixed-boosted-word2vec-linear",
+    "learned-boosted-mini-lm-linear"
 ]
 
 class SearchApp:

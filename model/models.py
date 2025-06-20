@@ -196,8 +196,6 @@ class ModelLoader:
         print(f"Model saved to {location}")
 
     def load_model_data(self, model_name, model_parameters_class, device):
-        torch.serialization.add_safe_globals([model_parameters_class])
-
         model_location = self.model_location(model_name)
         loaded_data = torch.load(model_location, map_location=device)
 
