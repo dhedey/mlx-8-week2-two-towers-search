@@ -98,7 +98,7 @@ class PersistableModel(nn.Module):
 
         registered_types = PersistableModel.registered_types
         if actual_class_name not in registered_types:
-            raise ValueError(f"Model class {actual_class_name} is not a known PersistedModel. Available classes: {list(registered_types.keys())}")
+            raise ValueError(f"Model class {actual_class_name} is not a known PersistableModel. Available classes: {list(registered_types.keys())}")
         actual_class: type[PersistableModel] = registered_types[actual_class_name]
 
         if not issubclass(actual_class, cls):

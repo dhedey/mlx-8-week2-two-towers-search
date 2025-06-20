@@ -196,15 +196,16 @@ class DualEncoderModel(PersistableModel):
     validation_metrics: Optional[dict] = None
 
     """A base class for all our dual encoder models."""
-    def __init__(self, model_name: str, training_parameters: TrainingHyperparameters):
+    def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PersistableData):
         super(DualEncoderModel, self).__init__()
         self.model_name = model_name
         self.training_parameters = training_parameters
+        self.model_parameters=model_parameters
 
     def build_creation_state(self) -> dict:
         return {
             "model_name": self.model_name,
-            "hyper_parameters": self.model_hyperparameters().to_dict(),
+            "hyper_parameters": self.model_parameters.to_dict(),
             "training_parameters": self.training_parameters.to_dict(),
             "validation_metrics": self.validation_metrics,
         }
@@ -235,9 +236,6 @@ class DualEncoderModel(PersistableModel):
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         raise NotImplementedError("This method should be implemented by subclasses.")
-    
-    def model_hyperparameters(self) -> PersistableData:
-        raise NotImplementedError("This method should be implemented by subclasses.")
 
 @dataclass
 class PooledTwoTowerModelHyperparameters(PersistableData):
@@ -251,7 +249,11 @@ class PooledTwoTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
 
     def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PooledTwoTowerModelHyperparameters):
-        super(PooledTwoTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
+        super(PooledTwoTowerModel, self).__init__(
+            model_name=model_name,
+            training_parameters=training_parameters,
+            model_parameters=model_parameters,
+        )
 
         tokenizer = get_tokenizer(model_parameters.tokenizer)
         default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
@@ -275,7 +277,6 @@ class PooledTwoTowerModel(DualEncoderModel):
             default_token_embeddings=default_token_embeddings,
             default_token_embedding_boosts=default_token_embedding_boosts,
         )
-        self._model_hyperparameters = model_parameters
     
     @classmethod
     def hyper_parameters_class(cls) -> type[PersistableData]:
@@ -327,10 +328,9 @@ class RNNTwoTowerModel(DualEncoderModel):
             include_layer_norms=model_parameters.include_layer_norms,
             output_size=model_parameters.comparison_embedding_size,
         )
-        self._model_hyperparameters = model_parameters
     
     @classmethod
-    def hyper_parameters_class(cls):
+    def hyper_parameters_class(cls) -> type[PersistableData]:
         return RNNTowerModelHyperparameters
 
     def tokenize_query(self, query: str) -> list[int]:
@@ -376,7 +376,6 @@ class PooledOneTowerModel(DualEncoderModel):
             default_token_embeddings=default_token_embeddings,
             default_token_embedding_boosts=default_token_embedding_boosts,
         )
-        self._model_hyperparameters = model_parameters
 
     @classmethod
     def hyper_parameters_class(cls) -> type[PersistableData]:
