@@ -234,56 +234,6 @@ class DualEncoderModel(PersistableModel):
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def model_hyperparameters(self):
-        raise NotImplementedError("This method should be implemented by subclasses.")
-
-    @classmethod
-    def hyper_parameters_class(cls):
-        # e.g. return (PooledTwoTowerModelHyperparameters, "models.PooledTwoTowerModelHyperparameters")
-        raise NotImplementedError("This class method should be implemented by subclasses.")
-
-    @classmethod
-    def load_for_evaluation(cls, model_name: str, device):
-        model_loader = ModelLoader()
-        loaded_model_data = model_loader.load_model_data(
-            model_name=model_name,
-            model_parameters_class=cls.hyper_parameters_class(),
-            device=device,
-        )
-        model = cls(
-            model_name=model_name,
-            training_parameters=TrainingHyperparameters.for_prediction(),
-            model_parameters=loaded_model_data["model_parameters"],
-        ).to(device)
-        model.load_state_dict(loaded_model_data["model"])
-        model.eval()
-        model.validation_metrics = loaded_model_data["validation_metrics"]
-
-        return model
-
-    @classmethod
-    def load_to_continue_training(cls, model_name: str, device):
-        model_loader = ModelLoader()
-        loaded_model_data = model_loader.load_model_data(
-            model_name=model_name,
-            model_parameters_class=cls.hyper_parameters_class(),
-            device=device,
-        )
-        model = cls(
-            model_name=model_name,
-            training_parameters=TrainingHyperparameters.from_dict(loaded_model_data["training_parameters"]),
-            model_parameters=loaded_model_data["model_parameters"],
-        ).to(device)
-        model.load_state_dict(loaded_model_data["model"])
-        model.train()
-        model.validation_metrics = loaded_model_data["validation_metrics"]
-
-        return {
-            "model": model,
-            "optimizer_state": loaded_model_data["optimizer_state"],
-            "epoch": loaded_model_data["epoch"],
-        }
-
 class ModelLoader:
     def __init__(self):
         self.folder = os.path.dirname(__file__)

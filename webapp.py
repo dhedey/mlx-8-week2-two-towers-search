@@ -3,8 +3,8 @@ import redis
 import json
 import torch
 import numpy as np
-from models import PooledTwoTowerModel, PooledOneTowerModel, TrainingHyperparameters, DualEncoderModel, ModelLoader
-from common import select_device
+from model.models import PooledTwoTowerModel, PooledOneTowerModel, TrainingHyperparameters, DualEncoderModel, ModelLoader
+from model.common import select_device
 import struct
 from redis.commands.search.query import Query
 
@@ -31,21 +31,8 @@ search_query = st.text_input('Enter your search query:')
 # Helper to load model
 @st.cache_resource
 def load_model(model_name):
-    device = select_device()
-    # Select model class based on model name
-    if model_name.endswith('-pooled'):
-        # Use PooledTwoTowerModel for most, fallback to PooledOneTowerModel for mini-lm
-        if 'mini-lm' in model_name:
-            model = PooledOneTowerModel.load_for_evaluation(model_name, device)
-        else:
-            model = PooledTwoTowerModel.load_for_evaluation(model_name, device)
-    elif model_name.endswith('-rnn'):
-        from models import RNNTwoTowerModel
-        model = RNNTwoTowerModel.load_for_evaluation(model_name, device)
-    else:
-        st.error('Unknown model type for selected model.')
-        return None, device
-    return model, device
+    model = DualEncoderModel.load_for_evaluation(model_name)
+    return model, model.get_device()
 
 def to_float32_bytes(vec):
     arr = np.array(vec, dtype=np.float32)
