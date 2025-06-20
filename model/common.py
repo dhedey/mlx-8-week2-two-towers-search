@@ -108,7 +108,9 @@ class PersistableModel(nn.Module):
         model = actual_class.create(
             creation_state=loaded_model_data["model"]["creation_state"],
             for_evaluation_only=for_evaluation_only
-        ).to(device)
+        )
+        model.load_state_dict(loaded_model_data["model"]["weights"])
+        model.to(device)
         return model, training_state
 
     @classmethod

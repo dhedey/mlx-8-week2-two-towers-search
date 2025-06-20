@@ -212,7 +212,6 @@ class DualEncoderModel(PersistableModel):
     @classmethod
     def create(cls, creation_state: dict, for_evaluation_only: bool) -> Self:
         """This method should return a new model from the creation state."""
-        print(creation_state)
         model = cls(
             model_name=creation_state["model_name"],
             training_parameters=TrainingHyperparameters.from_dict(creation_state["training_parameters"]),
@@ -420,10 +419,12 @@ if __name__ == "__main__":
 
         print("==========================")
         print(f"Loading model {model_name}...")
-        model = DualEncoderModel.load_for_evaluation(model_name)
+        model, training_state = DualEncoderModel.load(model_name, for_evaluation_only=True)
+        model.eval()
 
-        print(f"Previous validation metrics for {model_name}:")
-        print(model.validation_metrics)
+        training_state.optimizer_state = None  # Don't print it!
+        print(f"Training state: {training_state.to_dict()}")
+        print(f"Validation metrics: {model.validation_metrics}")
 
         document_embeddings = model.embed_tokenized_documents(
             [model.tokenize_document(doc) for doc in documents]
