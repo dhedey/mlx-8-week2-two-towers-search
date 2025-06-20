@@ -2,14 +2,14 @@
 """
 Weights & Biases Hyperparameter Sweep Script
 
-This script programmatically creates and runs wandb sweeps for the HackerNews score prediction model.
+This script programmatically creates and runs wandb sweeps for the dual encoder search model.
 It provides more control over the sweep process compared to the CLI-based approach.
 """
 
 import wandb
 import os
 
-from models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel
+from models import TrainingHyperparameters, PooledTwoTowerModelHyperparameters, PooledTwoTowerModel, RNNTwoTowerModel, RNNTowerModelHyperparameters
 from trainer import ModelTrainer
 from common import select_device
 
@@ -23,11 +23,14 @@ SWEEP_CONFIG = {
         'goal': 'maximize'
     },
     'parameters': {
+        'model_type': {
+            'values': ['pooled', 'rnn']
+        },
         'batch_size': {
             'values': [128, 256]
         },
         'tokenizer': {
-            'values': ["week1-word2vec", "pretrained:sentence-transformers/all-MiniLM-L6-v2", "pretrained:gpt2"]
+            'values': ["week1-word2vec", "pretrained:sentence-transformers/all-MiniLM-L6-v2"]
         },
         "embeddings": {
             'values': ["default-frozen", "default-unfrozen", "learned"]
@@ -116,19 +119,41 @@ def train_sweep_run():
             initial_token_embeddings_boost_kind=initial_token_embeddings_boost_kind,
             freeze_embedding_boosts=freeze_embedding_boosts,
         )
-        model_parameters = PooledTwoTowerModelHyperparameters(
-            tokenizer=config.tokenizer,
-            comparison_embedding_size=config.embedding_size,
-            query_tower_hidden_dimensions=[] if not config.include_hidden_layer else [config.embedding_size * 2],
-            doc_tower_hidden_dimensions=[] if not config.include_hidden_layer else [config.embedding_size * 2],
-            include_layer_norms=True,
-        )
 
-        model = PooledTwoTowerModel(
-            model_name="sweep-run",
-            training_parameters=training_parameters,
-            model_parameters=model_parameters,
-        )
+        # Determine hidden layer dimensions based on model type and configuration
+        if config.model_type == 'pooled':
+            hidden_dimensions = [] if not config.include_hidden_layer else [config.embedding_size * 2]
+            model_parameters = PooledTwoTowerModelHyperparameters(
+                tokenizer=config.tokenizer,
+                comparison_embedding_size=config.embedding_size,
+                query_tower_hidden_dimensions=hidden_dimensions,
+                doc_tower_hidden_dimensions=hidden_dimensions,
+                include_layer_norms=True,
+            )
+
+            model = PooledTwoTowerModel(
+                model_name="sweep-run",
+                training_parameters=training_parameters,
+                model_parameters=model_parameters,
+            )
+        elif config.model_type == 'rnn':
+            # For RNN models, always include hidden layers for the RNN processing
+            hidden_dimensions = [config.embedding_size * 2, config.embedding_size]
+            model_parameters = RNNTowerModelHyperparameters(
+                tokenizer=config.tokenizer,
+                comparison_embedding_size=config.embedding_size,
+                query_tower_hidden_dimensions=hidden_dimensions,
+                doc_tower_hidden_dimensions=hidden_dimensions,
+                include_layer_norms=True,
+            )
+
+            model = RNNTwoTowerModel(
+                model_name="sweep-run",
+                training_parameters=training_parameters,
+                model_parameters=model_parameters,
+            )
+        else:
+            raise ValueError(f"Unknown model type: {config.model_type}")
 
         trainer = ModelTrainer(model=model.to(device))
         results = trainer.train()
