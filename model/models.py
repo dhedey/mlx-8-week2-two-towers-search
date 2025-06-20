@@ -341,13 +341,11 @@ class RNNTwoTowerModel(DualEncoderModel):
         return self.tokenizer.tokenize(document)
 
     def embed_tokenized_queries(self, tokenized_queries: list[list[int]]):
-        device = next(self.parameters()).device
-        sequences = prepare_tokens_for_rnn(tokenized_queries, device)
+        sequences = prepare_tokens_for_rnn(tokenized_queries, self.get_device())
         return self.query_tower(sequences)
 
     def embed_tokenized_documents(self, tokenized_documents: list[list[int]]):
-        device = next(self.parameters()).device
-        sequences = prepare_tokens_for_rnn(tokenized_documents, device)
+        sequences = prepare_tokens_for_rnn(tokenized_documents, self.get_device())
         return self.document_tower(sequences)
 
 @dataclass
@@ -412,6 +410,7 @@ if __name__ == "__main__":
     model_names = [
         "fixed-boosted-word2vec-pooled",
         "learned-boosted-mini-lm-pooled",
+        "fine-tuned-mini-lm-pooled",
         "fixed-boosted-word2vec-rnn",
         "learned-boosted-word2vec-rnn",
         "learned-boosted-mini-lm-rnn",
