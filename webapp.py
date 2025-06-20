@@ -7,6 +7,7 @@ from model.models import PooledTwoTowerModel, PooledOneTowerModel, TrainingHyper
 from model.models import DualEncoderModel
 from model.models import ModelLoader
 from model.common import select_device
+import struct
 
 # Connect to Redis (adjust host/port/db as needed)
 r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
@@ -31,33 +32,30 @@ def load_model(model_type):
         model = PooledOneTowerModel.load_for_evaluation(model_name, device)
     return model, device
 
+def to_float32_bytes(vec):
+    arr = np.array(vec, dtype=np.float32)
+    return arr.tobytes()
+
 # Search button
 if st.button('Search'):
     if not search_query:
         st.warning('Please enter a search query.')
     else:
         model, device = load_model(model_type)
-        # Tokenize and embed the query
         tokenized_query = model.tokenize_query(search_query)
         query_embedding = model.embed_tokenized_queries([tokenized_query]).detach().cpu().numpy()[0]
-
-        # Retrieve all document IDs
-        doc_ids = r.zrange('docs', 0, -1)
-        results = []
-        for doc_id in doc_ids:
-            doc = r.get(f'doc:{doc_id}')
-            doc_emb = r.get(f'doc_emb:{doc_id}')
-            if doc and doc_emb:
-                doc_data = json.loads(doc)
-                doc_embedding = np.array(json.loads(doc_emb))
-                # Compute cosine similarity
-                sim = np.dot(query_embedding, doc_embedding) / (np.linalg.norm(query_embedding) * np.linalg.norm(doc_embedding) + 1e-8)
-                results.append((sim, doc_data))
-        if results:
-            results.sort(reverse=True, key=lambda x: x[0])
-            st.success(f'Found {len(results)} result(s):')
-            for sim, doc in results[:10]:
-                st.write(f"**Score:** {sim:.3f}")
-                st.write(doc)
+        # Convert embedding to float32 bytes for Redis vector search
+        query_vec_bytes = to_float32_bytes(query_embedding)
+        # Use Redis FT.SEARCH with KNN vector search
+        k = 10
+        base_query = f"*=>[KNN {k} @vector-two-tower-boosted-word2vec-linear $vec as score]"
+        query_params = {"vec": query_vec_bytes}
+        res = r.ft('doc_idx').search(base_query, query_params=query_params)
+        if res.docs:
+            st.success(f'Found {len(res.docs)} result(s):')
+            for doc in res.docs:
+                st.write(f"**Score:** {doc.score}")
+                st.write(f"**URL:** {getattr(doc, 'url', '')}")
+                st.write(f"**Passage:** {getattr(doc, 'passage', '')}")
         else:
             st.info('No results found.')
