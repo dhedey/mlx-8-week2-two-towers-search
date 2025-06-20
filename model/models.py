@@ -306,7 +306,11 @@ class RNNTwoTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
 
     def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: RNNTowerModelHyperparameters):
-        super(RNNTwoTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
+        super(RNNTwoTowerModel, self).__init__(
+            model_name=model_name,
+            training_parameters=training_parameters,
+            model_parameters=model_parameters,
+        )
 
         tokenizer = get_tokenizer(model_parameters.tokenizer)
         default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
@@ -360,7 +364,11 @@ class PooledOneTowerModel(DualEncoderModel):
     tokenizer: TokenizerBase
 
     def __init__(self, model_name: str, training_parameters: TrainingHyperparameters, model_parameters: PooledOneTowerModelHyperparameters):
-        super(PooledOneTowerModel, self).__init__(model_name=model_name, training_parameters=training_parameters)
+        super(PooledOneTowerModel, self).__init__(
+            model_name=model_name,
+            training_parameters=training_parameters,
+            model_parameters=model_parameters,
+        )
 
         tokenizer = get_tokenizer(model_parameters.tokenizer)
         default_token_embeddings = tokenizer.generate_default_embeddings(training_parameters.initial_token_embeddings_kind)
