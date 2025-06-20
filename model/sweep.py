@@ -73,10 +73,10 @@ def train_sweep_run():
     """
     # Initialize wandb run
     wandb.init()
-    
+
     try:
         config = wandb.config
-        
+
         print(f"\n🚀 Starting sweep run")
         device = select_device()
 
@@ -92,7 +92,7 @@ def train_sweep_run():
                 freeze_embeddings = False
             case _:
                 raise ValueError(f"Unknown embeddings type: {config.embeddings}")
-            
+
         match config.token_boosts:
             case "none":
                 initial_token_embeddings_boost_kind = "ones"
@@ -158,7 +158,7 @@ def train_sweep_run():
 
         trainer = ModelTrainer(model=model.to(device))
         results = trainer.train()
-        
+
         # Log final metrics (wandb.log is also called within train_model)
         wandb.log({
             "final_train_loss": results['last_epoch']['average_loss'],
@@ -167,15 +167,15 @@ def train_sweep_run():
             "final_validation_any_relevant_result": results['validation']["any_relevant_result"],
             "final_validation_average_relevance": results['validation']["average_relevance"],
         })
-        
+
         print(f"✅ Sweep run completed! Reciprical Rank: {results['validation']['reciprical_rank']:.4f}")
-        
+
     except Exception as e:
         print(f"❌ Sweep run failed: {e}")
         # Log the failure
         wandb.log({"status": "failed", "error": str(e)})
         raise
-    
+
     finally:
         # Ensure wandb run is properly finished
         wandb.finish()
@@ -184,7 +184,7 @@ def train_sweep_run():
 def create_and_run_sweep(config, project_name, count=10):
     """
     Create and run a wandb sweep programmatically.
-    
+
     Args:
         config: Sweep configuration dictionary (defaults to SWEEP_CONFIG)
         project_name: W&B project name
@@ -192,16 +192,16 @@ def create_and_run_sweep(config, project_name, count=10):
     """
     print(f"🔧 Creating sweep with {config['method']} optimization...")
     print(f"📊 Target metric: {config['metric']['name']} ({config['metric']['goal']})")
-    
+
     # Create the sweep
     sweep_id = wandb.sweep(config, project=project_name)
     print(f"✅ Sweep created with ID: {sweep_id}")
     print(f"🌐 View sweep at: https://wandb.ai/{wandb.api.default_entity}/{project_name}/sweeps/{sweep_id}")
-    
+
     # Run the sweep
     print(f"🏃 Starting sweep agent with {count} runs...")
     wandb.agent(sweep_id, train_sweep_run, project=project_name, count=count)
-    
+
     print(f"🎉 Sweep completed!")
     return sweep_id
 
@@ -209,7 +209,7 @@ def create_and_run_sweep(config, project_name, count=10):
 def run_existing_sweep(sweep_id, project_name, count=10):
     """
     Run an existing sweep by ID.
-    
+
     Args:
         sweep_id: The ID of an existing sweep
         count: Number of additional runs to execute
@@ -223,7 +223,7 @@ def main():
     Main function with different sweep options.
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Run hyperparameter sweeps')
     parser.add_argument('--project', default=PROJECT_NAME,
                         help=f'W&B project name (default: {PROJECT_NAME})')
@@ -233,24 +233,24 @@ def main():
                         help='Join existing sweep by ID instead of creating new one')
     parser.add_argument('--dry-run', action='store_true',
                         help='Just show the configuration without running')
-    
+
     args = parser.parse_args()
-    
+
     # Select configuration
     config = SWEEP_CONFIG
     print("📋 Using default Bayesian optimization configuration")
-    
+
     if args.dry_run:
         print("\n🔍 Sweep configuration:")
         import json
         print(json.dumps(config, indent=2))
         return
-    
+
     # Make sure we're in the right directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     print(f"📁 Working directory: {script_dir}")
-    
+
     # Run sweep
     if args.sweep_id:
         run_existing_sweep(args.sweep_id, args.project, args.count)
